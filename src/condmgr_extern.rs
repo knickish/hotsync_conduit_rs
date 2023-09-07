@@ -19,6 +19,7 @@ pub struct CondMgrApi {
     CmSetCreatorInfo:           unsafe extern "system" fn(pCreatorID: *const c_uchar, pInfo: *const c_uchar) -> ConduitRegistrationError,
     CmRemoveConduitByCreatorID: unsafe extern "system" fn(pCreatorID: *const c_uchar) -> ConduitRegistrationError,
     CmGetCorePath:              unsafe extern "system" fn(pPath: *mut c_uchar, bufSize: *mut c_int) -> ConduitRegistrationError,
+    CmGetHotSyncExecPath:       unsafe extern "system" fn(pPath: *mut c_uchar, bufSize: *mut c_int) -> ConduitRegistrationError,
     CmGetConduitCount:          unsafe extern "system" fn() -> ConduitRegistrationError,
     CmGetLibVersion:            unsafe extern "system" fn() -> u16,
 }

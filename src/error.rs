@@ -10,63 +10,63 @@ const TRANS_ERR_CLASS: i32 = 0x00002000;
 #[allow(unused, non_camel_case_types)]
 pub enum SyncManagerError {
     /// Success
-    SYNCERR_NONE                 = 0x0000,	
+    SYNCERR_NONE = 0x0000,
     /// An unknown error occurred (local/remote error code mapping does not exist)
-    SYNCERR_UNKNOWN               = (SYNC_ERR_CLASS + 0x01),	   
+    SYNCERR_UNKNOWN = (SYNC_ERR_CLASS + 0x01),
     /// NOT USED
-    SYNCERR_MORE                  = (SYNC_ERR_CLASS + 0x02),	   
+    SYNCERR_MORE = (SYNC_ERR_CLASS + 0x02),
     /// Requested database, record, resource, etc. not found
-    SYNCERR_NOT_FOUND				= (SYNC_ERR_CLASS + 0x03),     
+    SYNCERR_NOT_FOUND = (SYNC_ERR_CLASS + 0x03),
     /// Attempt to open a database failed
-    SYNCERR_FILE_NOT_OPEN         = (SYNC_ERR_CLASS + 0x04),	   
+    SYNCERR_FILE_NOT_OPEN = (SYNC_ERR_CLASS + 0x04),
     /// NOT USED
-    SYNCERR_FILE_OPEN             = (SYNC_ERR_CLASS + 0x05),	   
+    SYNCERR_FILE_OPEN = (SYNC_ERR_CLASS + 0x05),
     /// The requested record is in use by someone else and will remain so indefinitely
-    SYNCERR_RECORD_BUSY           = (SYNC_ERR_CLASS + 0x06),	   
+    SYNCERR_RECORD_BUSY = (SYNC_ERR_CLASS + 0x06),
     /// The requested record has either been deleted or archived
-    SYNCERR_RECORD_DELETED        = (SYNC_ERR_CLASS + 0x07),	   
+    SYNCERR_RECORD_DELETED = (SYNC_ERR_CLASS + 0x07),
     /// Caller does not have write access or database is in ROM Defined for backward compatility
-    SYNCERR_READ_ONLY             = (SYNC_ERR_CLASS + 0x09),	   
+    SYNCERR_READ_ONLY = (SYNC_ERR_CLASS + 0x09),
     /// Communications have not been intialized (this is an internal error code)
-    SYNCERR_COMM_NOT_INIT         = (SYNC_ERR_CLASS + 0x0A),	   
+    SYNCERR_COMM_NOT_INIT = (SYNC_ERR_CLASS + 0x0A),
     /// Could not create database because another one with the same name already exists on remote
-    SYNCERR_FILE_ALREADY_EXIST    = (SYNC_ERR_CLASS + 0x0B),	   
+    SYNCERR_FILE_ALREADY_EXIST = (SYNC_ERR_CLASS + 0x0B),
     /// The requested database is presently open by someone else
-    SYNCERR_FILE_ALREADY_OPEN     = (SYNC_ERR_CLASS + 0x0C),	   
+    SYNCERR_FILE_ALREADY_OPEN = (SYNC_ERR_CLASS + 0x0C),
     /// An operation was requested on a database when no databases were open
-    SYNCERR_NO_FILES_OPEN         = (SYNC_ERR_CLASS + 0x0D),	   
+    SYNCERR_NO_FILES_OPEN = (SYNC_ERR_CLASS + 0x0D),
     /// The requested operation is not supported on the given database type(record or resource).
-    SYNCERR_BAD_OPERATION         = (SYNC_ERR_CLASS + 0x0E),	   
+    SYNCERR_BAD_OPERATION = (SYNC_ERR_CLASS + 0x0E),
     /// Invalid argument passed to remote
-    SYNCERR_REMOTE_BAD_ARG        = (SYNC_ERR_CLASS + 0x0F),	   
+    SYNCERR_REMOTE_BAD_ARG = (SYNC_ERR_CLASS + 0x0F),
     /// Internal Desktop Link error -- indicates protocol implementation error
-    SYNCERR_BAD_ARG_WRAPPER       = (SYNC_ERR_CLASS + 0x10),	   
+    SYNCERR_BAD_ARG_WRAPPER = (SYNC_ERR_CLASS + 0x10),
     /// Internal Desktop Link error -- indicates protocol implementation error
-    SYNCERR_ARG_MISSING           = (SYNC_ERR_CLASS + 0x11),	   
+    SYNCERR_ARG_MISSING = (SYNC_ERR_CLASS + 0x11),
     /// The passed buffer is too small for the reply data
-    SYNCERR_LOCAL_BUFF_TOO_SMALL  = (SYNC_ERR_CLASS + 0x12),	   
+    SYNCERR_LOCAL_BUFF_TOO_SMALL = (SYNC_ERR_CLASS + 0x12),
     /// Insufficient memory on remote to receive or complete the request
-    SYNCERR_REMOTE_MEM            = (SYNC_ERR_CLASS + 0x13),	   
+    SYNCERR_REMOTE_MEM = (SYNC_ERR_CLASS + 0x13),
     /// Insufficient memory in remote data store to complete the request (write record, resource, etc.)
-    SYNCERR_REMOTE_NO_SPACE       = (SYNC_ERR_CLASS + 0x14),	   
+    SYNCERR_REMOTE_NO_SPACE = (SYNC_ERR_CLASS + 0x14),
     /// Generic remote system error (returned when exact cause is unknown)
-    SYNCERR_REMOTE_SYS            = (SYNC_ERR_CLASS + 0x15),	   
+    SYNCERR_REMOTE_SYS = (SYNC_ERR_CLASS + 0x15),
     /// Local (PC) memory allocation error
-    SYNCERR_LOCAL_MEM             = (SYNC_ERR_CLASS + 0x16),	   
+    SYNCERR_LOCAL_MEM = (SYNC_ERR_CLASS + 0x16),
     /// Invalid parameter to local function, or parameter is too big
-    SYNCERR_BAD_ARG			    = (SYNC_ERR_CLASS + 0x17),	   
+    SYNCERR_BAD_ARG = (SYNC_ERR_CLASS + 0x17),
     /// Data limit exceeded on remote (for example, when the hotsync error log size limit has been exceeded on remote)
-    SYNCERR_LIMIT_EXCEEDED		= (SYNC_ERR_CLASS + 0x18),	   
+    SYNCERR_LIMIT_EXCEEDED = (SYNC_ERR_CLASS + 0x18),
     /// This request (command) is not supported by remote
-    SYNCERR_UNKNOWN_REQUEST		= (SYNC_ERR_CLASS + 0x19),	   
+    SYNCERR_UNKNOWN_REQUEST = (SYNC_ERR_CLASS + 0x19),
     /// Request failed because there are too many open databases (for efficiency, the current Desktop Link implementation supports only one open database at a time)
-    SYNCERR_TOO_MANY_OPEN_FILES   = (SYNC_FATAL_ERR + 0x403),     
+    SYNCERR_TOO_MANY_OPEN_FILES = (SYNC_FATAL_ERR + 0x403),
     /// The request to cancel HotSync was initiated from the remote
-    SYNCERR_REMOTE_CANCEL_SYNC    = (SYNC_FATAL_ERR + 0x405),     
+    SYNCERR_REMOTE_CANCEL_SYNC = (SYNC_FATAL_ERR + 0x405),
     /// Connection is lost.  We add TRANS_ERR_CLASS because existing software checks that bit to detect connection loss.
-    SYNCERR_LOST_CONNECTION		= (SYNC_FATAL_ERR + TRANS_ERR_CLASS + 0x410),
+    SYNCERR_LOST_CONNECTION = (SYNC_FATAL_ERR + TRANS_ERR_CLASS + 0x410),
     /// The request to cancel HotSync was initiated from the PC
-    SYNCERR_LOCAL_CANCEL_SYNC		= (SYNC_FATAL_ERR + 0x411)
+    SYNCERR_LOCAL_CANCEL_SYNC = (SYNC_FATAL_ERR + 0x411),
 }
 
 impl Display for SyncManagerError {
@@ -89,7 +89,9 @@ impl Display for SyncManagerError {
             SyncManagerError::SYNCERR_REMOTE_BAD_ARG => write!(f, "SYNCERR_REMOTE_BAD_ARG"),
             SyncManagerError::SYNCERR_BAD_ARG_WRAPPER => write!(f, "SYNCERR_BAD_ARG_WRAPPER"),
             SyncManagerError::SYNCERR_ARG_MISSING => write!(f, "SYNCERR_ARG_MISSING"),
-            SyncManagerError::SYNCERR_LOCAL_BUFF_TOO_SMALL => write!(f, "SYNCERR_LOCAL_BUFF_TOO_SMALL"),
+            SyncManagerError::SYNCERR_LOCAL_BUFF_TOO_SMALL => {
+                write!(f, "SYNCERR_LOCAL_BUFF_TOO_SMALL")
+            }
             SyncManagerError::SYNCERR_REMOTE_MEM => write!(f, "SYNCERR_REMOTE_MEM"),
             SyncManagerError::SYNCERR_REMOTE_NO_SPACE => write!(f, "SYNCERR_REMOTE_NO_SPACE"),
             SyncManagerError::SYNCERR_REMOTE_SYS => write!(f, "SYNCERR_REMOTE_SYS"),
@@ -97,7 +99,9 @@ impl Display for SyncManagerError {
             SyncManagerError::SYNCERR_BAD_ARG => write!(f, "SYNCERR_BAD_ARG"),
             SyncManagerError::SYNCERR_LIMIT_EXCEEDED => write!(f, "SYNCERR_LIMIT_EXCEEDED"),
             SyncManagerError::SYNCERR_UNKNOWN_REQUEST => write!(f, "SYNCERR_UNKNOWN_REQUEST"),
-            SyncManagerError::SYNCERR_TOO_MANY_OPEN_FILES => write!(f, "SYNCERR_TOO_MANY_OPEN_FILES"),
+            SyncManagerError::SYNCERR_TOO_MANY_OPEN_FILES => {
+                write!(f, "SYNCERR_TOO_MANY_OPEN_FILES")
+            }
             SyncManagerError::SYNCERR_REMOTE_CANCEL_SYNC => write!(f, "SYNCERR_REMOTE_CANCEL_SYNC"),
             SyncManagerError::SYNCERR_LOST_CONNECTION => write!(f, "SYNCERR_LOST_CONNECTION"),
             SyncManagerError::SYNCERR_LOCAL_CANCEL_SYNC => write!(f, "SYNCERR_LOCAL_CANCEL_SYNC"),

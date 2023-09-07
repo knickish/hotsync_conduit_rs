@@ -11,8 +11,8 @@ const DB_NAMELEN: usize = 32;
 const SYNC_REMOTE_USERNAME_BUF_SIZE: usize = 64;
 const SYNC_REMOTE_PASSWORD_BUF_SIZE: usize = 64;
 
-type CONDHANDLE = u32;
-type openDatabaseHandle = u8;
+pub type CONDHANDLE = u32;
+pub type openDatabaseHandle = u8;
 type byteCardNo = u8;
 type intCardNo = i16;
 
@@ -277,42 +277,42 @@ pub struct CPositionInfo {
 
 #[rustfmt::skip]
 #[derive(WrapperApi)]
-struct SyncMgrApi {
-    SyncAddLogEntry:            unsafe extern "system" fn(text: *const core::ffi::c_char) -> SyncManagerError,
-    SyncRegisterConduit:        unsafe extern "system" fn(condhandle: *mut CONDHANDLE )-> SyncManagerError,
-    SyncUnRegisterConduit:      unsafe extern "system" fn(condhandle: CONDHANDLE )-> SyncManagerError,
-    SyncReadUserID:             unsafe extern "system" fn(user_info: *mut CUserIDInfo) -> SyncManagerError,
-    SyncOpenDB:                 unsafe extern "system" fn(pName: *const core::ffi::c_char,nCardNum: intCardNo,rHandle: *mut openDatabaseHandle, openMode: eDbOpenModes) -> SyncManagerError,
-    SyncDeleteDB:               unsafe extern "system" fn(pName: *const core::ffi::c_char, nCardNum: i16) -> SyncManagerError,
-    SyncCreateDB:               unsafe extern "system" fn(rDbStats: *mut CDbCreateDB) -> SyncManagerError,
-    SyncCloseDB:                unsafe extern "system" fn(fHandle: openDatabaseHandle) -> SyncManagerError,
-    SyncGetDBRecordCount:       unsafe extern "system" fn(fHandle: openDatabaseHandle, rCount: *mut u32) -> SyncManagerError,
-    SyncPurgeDeletedRecs:       unsafe extern "system" fn(fHandle: openDatabaseHandle) -> SyncManagerError,
-    SyncPurgeAllRecs:           unsafe extern "system" fn(fHandle: openDatabaseHandle) -> SyncManagerError,
-    SyncResetSyncFlags:         unsafe extern "system" fn(fHandle: openDatabaseHandle) -> SyncManagerError,
-    SyncReadDBList:             unsafe extern "system" fn(cardNo: byteCardNo, startIX: u16, bRam: bool, pList: *mut CDbList, rCnt: *mut i16) -> SyncManagerError,
-    SyncWriteRec:               unsafe extern "system" fn(rRec: *mut CRawRecordInfo) -> SyncManagerError,
-    SyncDeleteRec:              unsafe extern "system" fn(rRec: *const CRawRecordInfo) -> SyncManagerError,
-    SyncDeleteResourceRec:      unsafe extern "system" fn(rRec: CRawRecordInfo) -> SyncManagerError,
-    SyncDeleteAllResourceRec:   unsafe extern "system" fn(fHandle: openDatabaseHandle) -> SyncManagerError,
-    SyncReadRecordById:         unsafe extern "system" fn(rRec: *mut CRawRecordInfo) -> SyncManagerError,
-    SyncReadRecordByIndex:      unsafe extern "system" fn(rRec: *mut CRawRecordInfo) -> SyncManagerError,
-    SyncReadResRecordByIndex:   unsafe extern "system" fn(rRec: *mut CRawRecordInfo, bBody: bool) -> SyncManagerError,
-    SyncReadNextModifiedRec:    unsafe extern "system" fn(rRec: *mut CRawRecordInfo) -> SyncManagerError,
-    SyncReadDBAppInfoBlock:     unsafe extern "system" fn(fHandle: openDatabaseHandle, rDbInfo: *mut CDbGenInfo) -> SyncManagerError,
-    SyncWriteDBAppInfoBlock:    unsafe extern "system" fn(fHandle: openDatabaseHandle, rDbInfo: *const CDbGenInfo) -> SyncManagerError,
-    SyncWriteResourceRec:       unsafe extern "system" fn(rRec: CRawRecordInfo) -> SyncManagerError,
-    SyncRebootSystem:           unsafe extern "system" fn() -> SyncManagerError,
-    SyncReadSystemInfo:         unsafe extern "system" fn(rInfo: *mut CSystemInfo) -> SyncManagerError,
-    SyncReadSingleCardInfo:     unsafe extern "system" fn(rInfo: *mut CCardInfo) -> SyncManagerError,
-    SyncReadSysDateTime:        unsafe extern "system" fn(rDate: *mut i32) -> SyncManagerError,
-    SyncWriteSysDateTime:       unsafe extern "system" fn(lDate: i32) -> SyncManagerError,
-    SyncReadDBSortInfoBlock:    unsafe extern "system" fn(fHandle: openDatabaseHandle, rDbInfo: *mut CDbGenInfo) -> SyncManagerError,
-    SyncWriteDBSortInfoBlock:   unsafe extern "system" fn(fHandle: openDatabaseHandle, pDbInfo: *const CDbGenInfo) -> SyncManagerError,
-    SyncCallApplication:        unsafe extern "system" fn(rOutParams: *mut CCallAppParams, rInParams: *mut CCallAppParams) -> SyncManagerError,
-    SyncChangeCategory:         unsafe extern "system" fn(fHandle: openDatabaseHandle, from: u8, to: u8) -> SyncManagerError,
-    SyncReadPositionXMap:       unsafe extern "system" fn(rInfo: *mut CPositionInfo) -> SyncManagerError,
-    SyncYieldCycles:            unsafe extern "system" fn(wMaxMiliSecs: u16) -> SyncManagerError,
+pub struct SyncMgrApi {
+    SyncAddLogEntry:            unsafe extern "C" fn(text: *const core::ffi::c_char) -> SyncManagerError,
+    SyncRegisterConduit:        unsafe extern "C" fn(condhandle: *mut CONDHANDLE)-> SyncManagerError,
+    SyncUnRegisterConduit:      unsafe extern "C" fn(condhandle: CONDHANDLE)-> SyncManagerError,
+    SyncReadUserID:             unsafe extern "C" fn(user_info: *mut CUserIDInfo) -> SyncManagerError,
+    SyncOpenDB:                 unsafe extern "C" fn(pName: *const core::ffi::c_char,nCardNum: intCardNo,rHandle: *mut openDatabaseHandle, openMode: eDbOpenModes) -> SyncManagerError,
+    SyncDeleteDB:               unsafe extern "C" fn(pName: *const core::ffi::c_char, nCardNum: intCardNo) -> SyncManagerError,
+    SyncCreateDB:               unsafe extern "C" fn(rDbStats: *mut CDbCreateDB) -> SyncManagerError,
+    SyncCloseDB:                unsafe extern "C" fn(fHandle: openDatabaseHandle) -> SyncManagerError,
+    SyncGetDBRecordCount:       unsafe extern "C" fn(fHandle: openDatabaseHandle, rCount: *mut u32) -> SyncManagerError,
+    SyncPurgeDeletedRecs:       unsafe extern "C" fn(fHandle: openDatabaseHandle) -> SyncManagerError,
+    SyncPurgeAllRecs:           unsafe extern "C" fn(fHandle: openDatabaseHandle) -> SyncManagerError,
+    SyncResetSyncFlags:         unsafe extern "C" fn(fHandle: openDatabaseHandle) -> SyncManagerError,
+    SyncReadDBList:             unsafe extern "C" fn(cardNo: byteCardNo, startIX: u16, bRam: bool, pList: *mut CDbList, rCnt: *mut i16) -> SyncManagerError,
+    SyncWriteRec:               unsafe extern "C" fn(rRec: *mut CRawRecordInfo) -> SyncManagerError,
+    SyncDeleteRec:              unsafe extern "C" fn(rRec: *const CRawRecordInfo) -> SyncManagerError,
+    SyncDeleteResourceRec:      unsafe extern "C" fn(rRec: CRawRecordInfo) -> SyncManagerError,
+    SyncDeleteAllResourceRec:   unsafe extern "C" fn(fHandle: openDatabaseHandle) -> SyncManagerError,
+    SyncReadRecordById:         unsafe extern "C" fn(rRec: *mut CRawRecordInfo) -> SyncManagerError,
+    SyncReadRecordByIndex:      unsafe extern "C" fn(rRec: *mut CRawRecordInfo) -> SyncManagerError,
+    SyncReadResRecordByIndex:   unsafe extern "C" fn(rRec: *mut CRawRecordInfo, bBody: bool) -> SyncManagerError,
+    SyncReadNextModifiedRec:    unsafe extern "C" fn(rRec: *mut CRawRecordInfo) -> SyncManagerError,
+    SyncReadDBAppInfoBlock:     unsafe extern "C" fn(fHandle: openDatabaseHandle, rDbInfo: *mut CDbGenInfo) -> SyncManagerError,
+    SyncWriteDBAppInfoBlock:    unsafe extern "C" fn(fHandle: openDatabaseHandle, rDbInfo: *const CDbGenInfo) -> SyncManagerError,
+    SyncWriteResourceRec:       unsafe extern "C" fn(rRec: CRawRecordInfo) -> SyncManagerError,
+    SyncRebootSystem:           unsafe extern "C" fn() -> SyncManagerError,
+    SyncReadSystemInfo:         unsafe extern "C" fn(rInfo: *mut CSystemInfo) -> SyncManagerError,
+    SyncReadSingleCardInfo:     unsafe extern "C" fn(rInfo: *mut CCardInfo) -> SyncManagerError,
+    SyncReadSysDateTime:        unsafe extern "C" fn(rDate: *mut i32) -> SyncManagerError,
+    SyncWriteSysDateTime:       unsafe extern "C" fn(lDate: i32) -> SyncManagerError,
+    SyncReadDBSortInfoBlock:    unsafe extern "C" fn(fHandle: openDatabaseHandle, rDbInfo: *mut CDbGenInfo) -> SyncManagerError,
+    SyncWriteDBSortInfoBlock:   unsafe extern "C" fn(fHandle: openDatabaseHandle, pDbInfo: *const CDbGenInfo) -> SyncManagerError,
+    SyncCallApplication:        unsafe extern "C" fn(rOutParams: *mut CCallAppParams, rInParams: *mut CCallAppParams) -> SyncManagerError,
+    SyncChangeCategory:         unsafe extern "C" fn(fHandle: openDatabaseHandle, from: u8, to: u8) -> SyncManagerError,
+    SyncReadPositionXMap:       unsafe extern "C" fn(rInfo: *mut CPositionInfo) -> SyncManagerError,
+    SyncYieldCycles:            unsafe extern "C" fn(wMaxMiliSecs: u16) -> SyncManagerError,
 }
 
 #[cfg(test)]

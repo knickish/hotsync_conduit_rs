@@ -1,5 +1,5 @@
 use std::{
-    ffi::{c_int, CString},
+    ffi::{c_int, c_uchar, CString},
     io::Write,
     num::{NonZeroU32, NonZeroU8},
 };
@@ -14,7 +14,7 @@ use crate::{
 const COND_MGR_BIN: &[u8] = include_bytes!("../include/Condmgr.dll");
 
 #[derive(Debug)]
-pub struct ConduitInstallerBuilder {
+pub struct ConduitBuilder {
     creator: CString,
     creator_name: CString,
     creator_directory: Option<CString>,
@@ -42,7 +42,7 @@ macro_rules! return_iff_conduit_err {
     };
 }
 
-impl ConduitInstallerBuilder {
+impl ConduitBuilder {
     /// Set the CreatorID
     pub fn new_with_creator(
         creator: [char; 4],
@@ -94,28 +94,19 @@ impl ConduitInstallerBuilder {
         self.creator_user = Some(creator_user.into());
         self
     }
-
-    pub fn build(self) -> Result<ConduitInstaller, ConduitError> {
-        let cont: Container<CondMgrApi> = ConduitInstaller::load_cond_mgr_api()?;
-        Ok(ConduitInstaller {
-            fields: self,
-            api: cont,
-        })
-    }
 }
 
-pub struct ConduitInstaller {
-    fields: ConduitInstallerBuilder,
+pub struct ConduitManager {
     api: Container<CondMgrApi>,
 }
 
-impl ConduitInstaller {
+impl ConduitManager {
     const CONDUIT_APPLICATION: c_int = 1;
 
-    fn load_cond_mgr_api() -> Result<Container<CondMgrApi>, ConduitError> {
+    pub(crate) fn initialize() -> Result<Self, ConduitError> {
         let condmgr_name = "Condmgr.dll";
         if let Ok(wrapper) = unsafe { Container::load(condmgr_name) } {
-            Ok(wrapper)
+            Ok(Self { api: wrapper })
         } else {
             let mut path = std::env::temp_dir();
             path.push(condmgr_name);
@@ -123,19 +114,44 @@ impl ConduitInstaller {
             file.write_all(COND_MGR_BIN)?;
             file.sync_all()?;
             drop(file);
-            Ok(unsafe { Container::load(path) }?)
+            Ok(Self {
+                api: unsafe { Container::load(path) }?,
+            })
         }
     }
 
-    pub fn install(self) -> Result<(), ConduitError> {
-        let creator_id = self.fields.creator.as_bytes_with_nul().as_ptr();
-        let conduit_name = self.fields.creator_name.as_bytes_with_nul().as_ptr();
+    pub(crate) fn get_sync_mgr_dll_path(&self) -> Result<std::path::PathBuf, ConduitError> {
+        use std::path::PathBuf;
+        type SizeType = c_int;
+        const LEN: usize = 1000;
+        let mut tmp = [0 as c_uchar; LEN];
+        let size: SizeType;
+        unsafe {
+            let mut inner_size = std::mem::MaybeUninit::new(LEN as SizeType);
+            self.api
+                .CmGetHotSyncExecPath(tmp.as_mut_ptr(), inner_size.as_mut_ptr());
+            size = inner_size.assume_init();
+        }
+        if size as usize > LEN {
+            panic!("Unhandled size change");
+        }
+        let hs_path_c_string =
+            CString::from_vec_with_nul((&tmp[..(size as usize)]).to_vec()).unwrap();
+        let mut hs_path = PathBuf::from(hs_path_c_string.into_string().unwrap());
+        hs_path.pop();
+        hs_path.push("sync20.dll");
+        Ok(hs_path)
+    }
+
+    pub fn install(self, builder: ConduitBuilder) -> Result<(), ConduitError> {
+        let creator_id = builder.creator.as_bytes_with_nul().as_ptr();
+        let conduit_name = builder.creator_name.as_bytes_with_nul().as_ptr();
         return_iff_conduit_err!(unsafe {
             self.api
                 .CmInstallCreator(creator_id, Self::CONDUIT_APPLICATION)
         });
         return_iff_conduit_err!(unsafe { self.api.CmSetCreatorName(creator_id, conduit_name) });
-        if let Some(creator_directory) = self.fields.creator_directory {
+        if let Some(creator_directory) = builder.creator_directory {
             return_iff_conduit_err!(unsafe {
                 self.api.CmSetCreatorDirectory(
                     creator_id,
@@ -143,19 +159,19 @@ impl ConduitInstaller {
                 )
             });
         }
-        if let Some(creator_file) = self.fields.creator_file {
+        if let Some(creator_file) = builder.creator_file {
             return_iff_conduit_err!(unsafe {
                 self.api
                     .CmSetCreatorFile(creator_id, creator_file.as_bytes_with_nul().as_ptr())
             });
         }
-        if let Some(creator_remote) = self.fields.creator_remote {
+        if let Some(creator_remote) = builder.creator_remote {
             return_iff_conduit_err!(unsafe {
                 self.api
                     .CmSetCreatorRemote(creator_id, creator_remote.as_bytes_with_nul().as_ptr())
             });
         }
-        if let Some(creator_title) = self.fields.creator_title {
+        if let Some(creator_title) = builder.creator_title {
             return_iff_conduit_err!(unsafe {
                 self.api
                     .CmSetCreatorTitle(creator_id, creator_title.as_bytes_with_nul().as_ptr())
@@ -166,7 +182,7 @@ impl ConduitInstaller {
                 self.api.CmSetCreatorTitle(creator_id, conduit_name)
             });
         }
-        if let Some(creator_user) = self.fields.creator_user {
+        if let Some(creator_user) = builder.creator_user {
             return_iff_conduit_err!(unsafe {
                 self.api
                     .CmSetCreatorUser(creator_id, creator_user.as_bytes_with_nul().as_ptr())
@@ -175,15 +191,15 @@ impl ConduitInstaller {
         Ok(())
     }
 
-    pub fn reinstall(self) -> Result<(), ConduitError> {
+    pub fn reinstall(self, builder: ConduitBuilder) -> Result<(), ConduitError> {
         let res = unsafe {
             self.api
-                .CmRemoveConduitByCreatorID(self.fields.creator.as_bytes_with_nul().as_ptr())
+                .CmRemoveConduitByCreatorID(builder.creator.as_bytes_with_nul().as_ptr())
         };
         if (res as c_int) < 0 && !matches!(res, ConduitRegistrationError::ERR_NO_CONDUIT) {
             return Err(ConduitError::Registration(res));
         };
-        self.install()
+        self.install(builder)
     }
 }
 
@@ -195,14 +211,14 @@ mod test {
 
     #[test]
     fn test_load_api() {
-        ConduitInstaller::load_cond_mgr_api().unwrap();
+        ConduitManager::initialize().unwrap();
     }
 
     #[test]
     fn test_lib_version() {
-        let api = ConduitInstaller::load_cond_mgr_api().unwrap();
+        let mgr = ConduitManager::initialize().unwrap();
         unsafe {
-            if dbg!(api.CmGetLibVersion()) <= 0 {
+            if dbg!(mgr.api.CmGetLibVersion()) <= 0 {
                 panic!("Error getting version");
             };
         }
@@ -210,9 +226,9 @@ mod test {
 
     #[test]
     fn test_conduit_count() {
-        let api = ConduitInstaller::load_cond_mgr_api().unwrap();
+        let mgr = ConduitManager::initialize().unwrap();
         unsafe {
-            if dbg!(api.CmGetConduitCount() as i16) < 0 {
+            if dbg!(mgr.api.CmGetConduitCount() as i16) < 0 {
                 panic!("Error getting version");
             };
         }
@@ -223,11 +239,33 @@ mod test {
         type SizeType = c_int;
         const LEN: usize = 100;
         let mut tmp = [0 as c_uchar; LEN];
-        let api = ConduitInstaller::load_cond_mgr_api().unwrap();
+        let mgr = ConduitManager::initialize().unwrap();
         let size: SizeType;
         unsafe {
             let mut inner_size = std::mem::MaybeUninit::new(LEN as SizeType);
-            api.CmGetCorePath(tmp.as_mut_ptr(), dbg!(inner_size.as_mut_ptr()));
+            mgr.api
+                .CmGetCorePath(tmp.as_mut_ptr(), dbg!(inner_size.as_mut_ptr()));
+            size = inner_size.assume_init();
+        }
+        if dbg!(size as usize) > LEN {
+            dbg!(size);
+            panic!("Unhandled size change");
+        }
+
+        dbg!(CString::from_vec_with_nul((&tmp[..(size as usize)]).to_vec()).unwrap());
+    }
+
+    #[test]
+    fn test_hs_path() {
+        type SizeType = c_int;
+        const LEN: usize = 100;
+        let mut tmp = [0 as c_uchar; LEN];
+        let mgr = ConduitManager::initialize().unwrap();
+        let size: SizeType;
+        unsafe {
+            let mut inner_size = std::mem::MaybeUninit::new(LEN as SizeType);
+            mgr.api
+                .CmGetHotSyncExecPath(tmp.as_mut_ptr(), dbg!(inner_size.as_mut_ptr()));
             size = inner_size.assume_init();
         }
         if dbg!(size as usize) > LEN {
@@ -241,15 +279,16 @@ mod test {
     #[ignore]
     #[test]
     fn test_install() {
-        ConduitInstallerBuilder::new_with_creator(
+        let builder = ConduitBuilder::new_with_creator(
             ['H', 'e', 'f', 'f'],
             CString::new("heffalump.dll").unwrap(),
         )
         .unwrap()
-        .with_title(CString::new("Heffalump").unwrap())
-        .build()
-        .unwrap()
-        .reinstall()
-        .unwrap();
+        .with_title(CString::new("Heffalump").unwrap());
+
+        ConduitManager::initialize()
+            .unwrap()
+            .reinstall(builder)
+            .unwrap();
     }
 }
