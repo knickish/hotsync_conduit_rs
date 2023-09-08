@@ -2,6 +2,11 @@
 #![allow(non_camel_case_types)]
 #![allow(unused)]
 
+use std::{
+    ffi::{c_int, c_short, CString},
+    marker::PhantomData,
+};
+
 use dlopen2::wrapper::WrapperApi;
 
 use crate::error::SyncManagerError;
@@ -14,7 +19,7 @@ const SYNC_REMOTE_PASSWORD_BUF_SIZE: usize = 64;
 pub type CONDHANDLE = u32;
 pub type openDatabaseHandle = u8;
 type byteCardNo = u8;
-type intCardNo = i16;
+type intCardNo = c_int;
 
 #[repr(u32)]
 pub enum eSyncTypes {
@@ -52,16 +57,31 @@ pub enum eSyncPref {
 bitflags::bitflags! {
     #[repr(transparent)]
     #[derive(Clone, Copy, Debug)]
-    pub struct eDbFlags: u16 {
-        const eRecord               = 0x01;
-        const eResource             = 0x02;
-        const eReadOnly             = 0x04;
-        const eAppInfoDirty         = 0x08;
-        const eBackupDb             = 0x30;
-        const eOkToInstallNewer     = 0x20;
-        const eResetAfterInstall    = 0x10;
-        const eCopyPRevention       = 0x40;
-        const eOpenDb               = 0x40;
+    pub struct eDbFlags: u32 {
+        const eRecord               = 0x0000;
+        const eResource             = 0x0001;
+        const eReadOnly             = 0x0002;
+        const eAppInfoDirty         = 0x0004;
+        const eBackupDb             = 0x0008;
+        const eOkToInstallNewer     = 0x0010;
+        const eResetAfterInstall    = 0x0020;
+        const eCopyPRevention       = 0x0040;
+        const eOpenDb               = 0x8000;
+    }
+}
+
+bitflags::bitflags! {
+    #[repr(transparent)]
+    #[derive(Clone, Copy, Debug)]
+    pub struct eSyncRecAttrs: u32 {
+        const eRecAttrDeleted	= 0x80;	// indicates that this record has been deleted on the handheld
+        const eRecAttrDirty		= 0x40;	// indicates that this record was modified
+        const eRecAttrBusy		= 0x20;	// SYSTEM USE ONLY: indicates that this record is currently in use
+                                        // by some application on the remote, hand-held device.
+                                        // CONDUITS: this attribute must be treated as read-only; do *not* pass
+                                        // eRecAttrBusy when writing records.
+        const eRecAttrSecret	= 0x10;	// "secret" record - password protected (also known as "private")
+        const eRecAttrArchived	= 0x08;	// indicates that this record has been marked for archival
     }
 }
 
@@ -76,31 +96,67 @@ bitflags::bitflags! {
     }
 }
 
-#[repr(C, align(1))]
+#[repr(packed, C)]
 pub struct CDbCreateDB {
     /// Upon return gets filled in by SyncMgr.Dll
     m_FileHandle: openDatabaseHandle,
     /// Supplied by caller, obtained from DbList
     m_Creator: u32,
     /// Supplied by caller, Res/Rec/RAM
-    m_Flags: eDbFlags,
+    m_Flags: u32,
     /// Supplied by caller, target card #
     m_CardNo: byteCardNo,
     /// Supplied by caller, target DBase Name.
     /// must be null-terminated
-    m_Name: [core::ffi::c_char; DB_NAMELEN],
+    m_Name: [core::ffi::c_uchar; DB_NAMELEN],
     /// 4-char type of the new db
     /// for example 'DATA' or 'APPL'...
     m_Type: u32,
 
     m_Version: u16,
-    m_dwReserverd: u32,
+    m_dwReserved: u32,
 }
 
-#[repr(C, align(1))]
+impl CDbCreateDB {
+    pub fn new(to_create: CString, creator_id: u32, ty: u32, resource: bool) -> Self {
+        let m_Flags = if resource {
+            eDbFlags::eResource.bits()
+        } else {
+            eDbFlags::eRecord.bits()
+        };
+
+        let m_Name = {
+            let mut name = [0; DB_NAMELEN];
+            for (idx, char) in to_create.into_bytes().into_iter().enumerate() {
+                if idx >= DB_NAMELEN - 1 {
+                    break;
+                }
+                name[idx] = char;
+            }
+            name
+        };
+
+        Self {
+            m_FileHandle: 0,
+            m_Creator: creator_id,
+            m_Flags,
+            m_CardNo: 0,
+            m_Name,
+            m_Type: ty,
+            m_Version: 0,
+            m_dwReserved: 0,
+        }
+    }
+
+    pub fn handle(self) -> openDatabaseHandle {
+        self.m_FileHandle
+    }
+}
+
+#[repr(packed, C)]
 pub struct CDbGenInfo {
     /// Name of remote database file
-    m_FileName: [core::ffi::c_char; SYNC_DB_NAMELEN],
+    m_FileName: [core::ffi::c_uchar; SYNC_DB_NAMELEN],
     /// When reading, the caller must fill this in
     /// with the size of the buffer pointed to by m_pBytes;
     /// When writing, the caller must set both this field
@@ -129,8 +185,8 @@ pub struct CDbGenInfo {
 ///  of a database's record layout, specifically that of the remote device.
 ///  Raw bytes will be formatted into this structure by the DTLinkConverter
 ///  object which resides inside of each Conduit.DLL.
-#[repr(C, align(1))]
-pub struct CRawRecordInfo {
+#[repr(packed, C)]
+pub struct CRawRecordInfo<'buffer> {
     /// Supplied by caller
     m_FileHandle: openDatabaseHandle,
     /// Supplied by caller when reading or deleting records by record id; supplied by
@@ -145,9 +201,9 @@ pub struct CRawRecordInfo {
     /// Filled in by HH when reading, and by caller when writing
     m_Attribs: u8,
     /// Filled in by HH when reading, and by caller when writing
-    m_CatId: i16,
+    m_CatId: c_short,
     /// Ignore
-    m_ConduitId: i16,
+    m_ConduitId: c_int,
     /// When reading, filled in by HH with the actual record/resource size,
     /// which might be bigger than buffer size m_TotalBytes (in this
     /// case, only the first m_TotalBytes of record data will be copied
@@ -165,13 +221,39 @@ pub struct CRawRecordInfo {
     m_pBytes: *mut u8,
     /// Reserved	- set to NULL
     m_dwReserved: u32,
+    /// zst to track lifetime of data buffer
+    buffer_lifetime: PhantomData<&'buffer [u8]>,
 }
 
-#[repr(C, align(1))]
+impl<'buffer> CRawRecordInfo<'buffer> {
+    pub unsafe fn new_for_writing(
+        m_FileHandle: openDatabaseHandle,
+        m_Attribs: u8,
+        m_CatId: i16,
+        resource_type_and_id: Option<(u32, u16)>,
+        bytes: &mut Vec<u8>,
+    ) -> Self {
+        Self {
+            m_FileHandle,
+            m_RecId: resource_type_and_id.map(|(ty, _)| ty).unwrap_or(0),
+            m_RecIndex: resource_type_and_id.map(|(_, id)| id).unwrap_or(0),
+            m_Attribs,
+            m_CatId,
+            m_ConduitId: 0,
+            m_RecSize: bytes.len() as u32,
+            m_TotalBytes: bytes.len() as u16,
+            m_pBytes: bytes.as_mut_ptr(),
+            m_dwReserved: 0,
+            buffer_lifetime: PhantomData,
+        }
+    }
+}
+
+#[repr(packed, C)]
 pub struct CUserIDInfo {
-    m_pName: [core::ffi::c_char; SYNC_REMOTE_USERNAME_BUF_SIZE],
+    m_pName: [core::ffi::c_uchar; SYNC_REMOTE_USERNAME_BUF_SIZE],
     m_NameLength: i16,
-    m_Password: [core::ffi::c_char; SYNC_REMOTE_PASSWORD_BUF_SIZE],
+    m_Password: [core::ffi::c_uchar; SYNC_REMOTE_PASSWORD_BUF_SIZE],
     m_PasswdLength: i16,
     /// Date/Time of last synchronization
     m_LastSyncDate: i32,
@@ -183,13 +265,13 @@ pub struct CUserIDInfo {
 }
 
 ///  A single element for a ReadDBList function call.
-#[repr(C, align(1))]
+#[repr(packed, C)]
 pub struct CDbList {
     m_CardNum: i16,
     /// contains Res/Record/Backup/ReadOnly (see enum eDbFlags)
     m_DbFlags: u16,
     m_DbType: u32,
-    m_Name: [core::ffi::c_char; SYNC_DB_NAMELEN],
+    m_Name: [core::ffi::c_uchar; SYNC_DB_NAMELEN],
     m_Creator: u32,
     m_Version: u16,
     m_ModNumber: u32,
@@ -207,14 +289,14 @@ pub struct CDbList {
 }
 
 /// Used to obtain remote system information.
-#[repr(C, align(1))]
+#[repr(packed, C)]
 pub struct CSystemInfo {
-    m_RomSoftVersion: u32,                   // Upon return is filled in
-    m_LocalId: u32,                          // Upon return is filled in
-    m_ProdIdLength: u8,                      // Upon return is filled in (actual len)
-    m_AllocedLen: u8,                        // Supplied by caller: size of buffer for ProductIdText
-    m_ProductIdText: *mut core::ffi::c_char, // Allocated by caller: bufer for ProductIdText
-    m_dwReserved: u32,                       // Reserved - set to NULL
+    m_RomSoftVersion: u32,                    // Upon return is filled in
+    m_LocalId: u32,                           // Upon return is filled in
+    m_ProdIdLength: u8,                       // Upon return is filled in (actual len)
+    m_AllocedLen: u8, // Supplied by caller: size of buffer for ProductIdText
+    m_ProductIdText: *mut core::ffi::c_uchar, // Allocated by caller: bufer for ProductIdText
+    m_dwReserved: u32, // Reserved - set to NULL
 }
 
 impl CSystemInfo {
@@ -223,7 +305,7 @@ impl CSystemInfo {
 }
 
 ///  A structure element for the SyncReadSingleCardInfo() function call.
-#[repr(C, align(1))]
+#[repr(packed, C)]
 pub struct CCardInfo {
     m_CardNo: u8,
     m_CardVersion: u16,
@@ -233,8 +315,8 @@ pub struct CCardInfo {
     m_FreeRam: u32,
     m_CardNameLen: u8,
     m_ManufNameLen: u8,
-    m_CardName: [core::ffi::c_char; Self::SYNC_REMOTE_CARDNAME_BUF_SIZE],
-    m_ManufName: [core::ffi::c_char; Self::SYNC_REMOTE_MANUFNAME_BUF_SIZE],
+    m_CardName: [core::ffi::c_uchar; Self::SYNC_REMOTE_CARDNAME_BUF_SIZE],
+    m_ManufName: [core::ffi::c_uchar; Self::SYNC_REMOTE_MANUFNAME_BUF_SIZE],
     /// number of ROM-based databases
     m_romDbCount: u16,
     /// number of RAM-based databases
@@ -249,7 +331,7 @@ impl CCardInfo {
 }
 
 ///  Used by the 'SyncCallApplication()' API
-#[repr(C, align(1))]
+#[repr(packed, C)]
 pub struct CCallAppParams {
     m_CreatorID: u32,
     m_ActionCode: u16,
@@ -259,7 +341,7 @@ pub struct CCallAppParams {
 }
 
 ///  Used by ReadPositionXMap
-#[repr(C, align(1))]
+#[repr(packed, C)]
 pub struct CPositionInfo {
     /// Open database handle
     m_FileHandle: openDatabaseHandle,
@@ -278,12 +360,12 @@ pub struct CPositionInfo {
 #[rustfmt::skip]
 #[derive(WrapperApi)]
 pub struct SyncMgrApi {
-    SyncAddLogEntry:            unsafe extern "C" fn(text: *const core::ffi::c_char) -> SyncManagerError,
+    SyncAddLogEntry:            unsafe extern "C" fn(text: *const core::ffi::c_uchar) -> SyncManagerError,
     SyncRegisterConduit:        unsafe extern "C" fn(condhandle: *mut CONDHANDLE)-> SyncManagerError,
     SyncUnRegisterConduit:      unsafe extern "C" fn(condhandle: CONDHANDLE)-> SyncManagerError,
     SyncReadUserID:             unsafe extern "C" fn(user_info: *mut CUserIDInfo) -> SyncManagerError,
-    SyncOpenDB:                 unsafe extern "C" fn(pName: *const core::ffi::c_char,nCardNum: intCardNo,rHandle: *mut openDatabaseHandle, openMode: eDbOpenModes) -> SyncManagerError,
-    SyncDeleteDB:               unsafe extern "C" fn(pName: *const core::ffi::c_char, nCardNum: intCardNo) -> SyncManagerError,
+    SyncOpenDB:                 unsafe extern "C" fn(pName: *const core::ffi::c_uchar,nCardNum: intCardNo,rHandle: *mut openDatabaseHandle, openMode: eDbOpenModes) -> SyncManagerError,
+    SyncDeleteDB:               unsafe extern "C" fn(pName: *const core::ffi::c_uchar, nCardNum: intCardNo) -> SyncManagerError,
     SyncCreateDB:               unsafe extern "C" fn(rDbStats: *mut CDbCreateDB) -> SyncManagerError,
     SyncCloseDB:                unsafe extern "C" fn(fHandle: openDatabaseHandle) -> SyncManagerError,
     SyncGetDBRecordCount:       unsafe extern "C" fn(fHandle: openDatabaseHandle, rCount: *mut u32) -> SyncManagerError,
@@ -313,17 +395,4 @@ pub struct SyncMgrApi {
     SyncChangeCategory:         unsafe extern "C" fn(fHandle: openDatabaseHandle, from: u8, to: u8) -> SyncManagerError,
     SyncReadPositionXMap:       unsafe extern "C" fn(rInfo: *mut CPositionInfo) -> SyncManagerError,
     SyncYieldCycles:            unsafe extern "C" fn(wMaxMiliSecs: u16) -> SyncManagerError,
-}
-
-#[cfg(test)]
-mod test {
-    use dlopen2::wrapper::Container;
-
-    use super::*;
-
-    #[test]
-    fn test_load() {
-        let mut cont: Container<SyncMgrApi> = unsafe { Container::load("Sync20.dll") }
-            .expect("Could not open library or load symbols");
-    }
 }

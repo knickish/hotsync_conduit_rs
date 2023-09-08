@@ -7,4 +7,6 @@ mod syncmgr_extern;
 
 mod error;
 
-pub use condmgr::{ConduitBuilder, ConduitManager};
+pub use condmgr::{ConduitInstallation, ConduitManager};
+pub use error::SyncManagerError;
+pub use syncmgr::*;

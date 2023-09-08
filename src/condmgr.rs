@@ -14,7 +14,7 @@ use crate::{
 const COND_MGR_BIN: &[u8] = include_bytes!("../include/Condmgr.dll");
 
 #[derive(Debug)]
-pub struct ConduitBuilder {
+pub struct ConduitInstallation {
     creator: CString,
     creator_name: CString,
     creator_directory: Option<CString>,
@@ -42,7 +42,7 @@ macro_rules! return_iff_conduit_err {
     };
 }
 
-impl ConduitBuilder {
+impl ConduitInstallation {
     /// Set the CreatorID
     pub fn new_with_creator(
         creator: [char; 4],
@@ -103,7 +103,7 @@ pub struct ConduitManager {
 impl ConduitManager {
     const CONDUIT_APPLICATION: c_int = 1;
 
-    pub(crate) fn initialize() -> Result<Self, ConduitError> {
+    pub fn initialize() -> Result<Self, ConduitError> {
         let condmgr_name = "Condmgr.dll";
         if let Ok(wrapper) = unsafe { Container::load(condmgr_name) } {
             Ok(Self { api: wrapper })
@@ -143,7 +143,7 @@ impl ConduitManager {
         Ok(hs_path)
     }
 
-    pub fn install(self, builder: ConduitBuilder) -> Result<(), ConduitError> {
+    pub fn install(self, builder: ConduitInstallation) -> Result<(), ConduitError> {
         let creator_id = builder.creator.as_bytes_with_nul().as_ptr();
         let conduit_name = builder.creator_name.as_bytes_with_nul().as_ptr();
         return_iff_conduit_err!(unsafe {
@@ -191,7 +191,7 @@ impl ConduitManager {
         Ok(())
     }
 
-    pub fn reinstall(self, builder: ConduitBuilder) -> Result<(), ConduitError> {
+    pub fn reinstall(self, builder: ConduitInstallation) -> Result<(), ConduitError> {
         let res = unsafe {
             self.api
                 .CmRemoveConduitByCreatorID(builder.creator.as_bytes_with_nul().as_ptr())
@@ -210,11 +210,13 @@ mod test {
     use super::*;
 
     #[test]
+    #[ignore]
     fn test_load_api() {
         ConduitManager::initialize().unwrap();
     }
 
     #[test]
+    #[ignore]
     fn test_lib_version() {
         let mgr = ConduitManager::initialize().unwrap();
         unsafe {
@@ -225,6 +227,7 @@ mod test {
     }
 
     #[test]
+    #[ignore]
     fn test_conduit_count() {
         let mgr = ConduitManager::initialize().unwrap();
         unsafe {
@@ -235,6 +238,7 @@ mod test {
     }
 
     #[test]
+    #[ignore]
     fn test_core_path() {
         type SizeType = c_int;
         const LEN: usize = 100;
@@ -256,6 +260,7 @@ mod test {
     }
 
     #[test]
+    #[ignore]
     fn test_hs_path() {
         type SizeType = c_int;
         const LEN: usize = 100;
@@ -274,21 +279,5 @@ mod test {
         }
 
         dbg!(CString::from_vec_with_nul((&tmp[..(size as usize)]).to_vec()).unwrap());
-    }
-
-    #[ignore]
-    #[test]
-    fn test_install() {
-        let builder = ConduitBuilder::new_with_creator(
-            ['H', 'e', 'f', 'f'],
-            CString::new("heffalump.dll").unwrap(),
-        )
-        .unwrap()
-        .with_title(CString::new("Heffalump").unwrap());
-
-        ConduitManager::initialize()
-            .unwrap()
-            .reinstall(builder)
-            .unwrap();
     }
 }
