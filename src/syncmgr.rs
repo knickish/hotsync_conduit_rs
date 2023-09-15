@@ -1,10 +1,11 @@
 use std::{
+    error::Error,
     ffi::{c_uchar, CString},
     mem::MaybeUninit,
 };
 
 use dlopen2::wrapper::Container;
-use palmrs::database::{record::DatabaseRecord, PalmDatabase, PdbDatabase};
+use palmrs::database::{record::DatabaseRecord, DatabaseFormat, PalmDatabase, PdbDatabase};
 
 use crate::{
     error::{ConduitError, SyncManagerError},
@@ -58,12 +59,20 @@ impl ConduitDBSource {
     }
 }
 
+type WorkOnDbType = Box<
+    dyn FnMut(
+        Vec<(<PdbDatabase as DatabaseFormat>::RecordHeader, Vec<u8>)>,
+    ) -> Result<(), Box<dyn Error + Sync + Send>>,
+>;
+
 pub struct ConduitBuilder {
     name: CString,
     creator_id: u32,
     create_if_not_exists: Vec<ConduitDBSource>,
     overwrite: Vec<ConduitDBSource>,
+
     to_remove: Vec<CString>,
+    to_download: Vec<(CString, WorkOnDbType)>,
 }
 
 impl ConduitBuilder {
@@ -75,12 +84,19 @@ impl ConduitBuilder {
             create_if_not_exists: Vec::new(),
             overwrite: Vec::new(),
             to_remove: Vec::new(),
+            to_download: Vec::new(),
         }
     }
 
     /// Remove a database from the handheld, if it exists
     pub fn remove_db(mut self, to_remove: CString) -> Self {
         self.to_remove.push(to_remove);
+        self
+    }
+
+    /// Download the records from a database on the handheld
+    pub fn download_db_and(mut self, to_download: CString, do_work: WorkOnDbType) -> Self {
+        self.to_download.push((to_download, do_work));
         self
     }
 
@@ -104,6 +120,7 @@ impl ConduitBuilder {
             create_if_not_exists,
             overwrite,
             to_remove,
+            to_download,
         } = self;
         Conduit {
             name,
@@ -114,6 +131,7 @@ impl ConduitBuilder {
                 .collect(),
             overwrite: overwrite.into_iter().map(ConduitDBSource::get_db).collect(),
             to_remove,
+            to_download,
         }
     }
 }
@@ -123,7 +141,9 @@ pub struct Conduit {
     creator_id: u32,
     create_if_not_exists: Vec<(CString, u32, PalmDatabase<PdbDatabase>)>,
     overwrite: Vec<(CString, u32, PalmDatabase<PdbDatabase>)>,
+
     to_remove: Vec<CString>,
+    to_download: Vec<(CString, WorkOnDbType)>,
 }
 
 impl Conduit {
@@ -186,6 +206,13 @@ impl Conduit {
         );
         sync.log_to_hs_log(CString::new(log_str).unwrap())?;
         Ok(stats.handle())
+    }
+    fn drain_db(
+        handle: openDatabaseHandle,
+        sync: &SyncSession,
+    ) -> Result<Vec<(<PdbDatabase as DatabaseFormat>::RecordHeader, Vec<u8>)>, ConduitError> {
+        compile_error!("continue here");
+        Ok(Vec::new())
     }
 
     fn fill_db(
