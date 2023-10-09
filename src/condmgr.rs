@@ -11,7 +11,7 @@ use crate::{
     error::{ConduitError, ConduitRegistrationError},
 };
 
-const COND_MGR_BIN: &[u8] = include_bytes!("../include/Condmgr.dll");
+const COND_MGR_BIN: &[u8] = include_bytes!("../include/condmgr.dll");
 
 #[derive(Debug)]
 pub struct ConduitInstallation {
