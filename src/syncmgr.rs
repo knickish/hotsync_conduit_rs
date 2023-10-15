@@ -5,11 +5,17 @@ use std::{
 };
 
 use dlopen2::wrapper::Container;
-use palmrs::database::{record::DatabaseRecord, DatabaseFormat, PalmDatabase, PdbDatabase};
+use palmrs::database::{
+    record::{pdb_record::RecordAttributes, DatabaseRecord},
+    PalmDatabase, PdbDatabase,
+};
 
 use crate::{
     error::{ConduitError, SyncManagerError},
-    syncmgr_extern::{openDatabaseHandle, CDbCreateDB, CRawRecordInfo, SyncMgrApi, CONDHANDLE},
+    syncmgr_extern::{
+        eDbOpenModes, openDatabaseHandle, CDbCreateDB, CRawRecordInfo, SyncMgrApi, CONDHANDLE,
+        DB_NAMELEN,
+    },
     ConduitManager,
 };
 
@@ -38,6 +44,12 @@ pub enum ConduitDBSource {
     // add a way to pass modified/deleted recs here and update a db
 }
 
+/// Need the database name (with no extension), the type code, and the db itself
+pub enum ConduitDBSink {
+    Dynamic(WorkOnDbType),
+    // add a way to pass modified/deleted recs here and update a db
+}
+
 impl ConduitDBSource {
     fn load_db_from_path(path: std::path::PathBuf) -> PalmDatabase<PdbDatabase> {
         let file_contents = std::fs::read(path).unwrap();
@@ -60,9 +72,7 @@ impl ConduitDBSource {
 }
 
 type WorkOnDbType = Box<
-    dyn FnMut(
-        Vec<(<PdbDatabase as DatabaseFormat>::RecordHeader, Vec<u8>)>,
-    ) -> Result<(), Box<dyn Error + Sync + Send>>,
+    dyn FnMut(Vec<(Vec<u8>, RecordAttributes, u32)>) -> Result<(), Box<dyn Error + Sync + Send>>,
 >;
 
 pub struct ConduitBuilder {
@@ -72,7 +82,7 @@ pub struct ConduitBuilder {
     overwrite: Vec<ConduitDBSource>,
 
     to_remove: Vec<CString>,
-    to_download: Vec<(CString, WorkOnDbType)>,
+    to_download: Vec<(CString, ConduitDBSink)>,
 }
 
 impl ConduitBuilder {
@@ -95,7 +105,7 @@ impl ConduitBuilder {
     }
 
     /// Download the records from a database on the handheld
-    pub fn download_db_and(mut self, to_download: CString, do_work: WorkOnDbType) -> Self {
+    pub fn download_db_and(mut self, to_download: CString, do_work: ConduitDBSink) -> Self {
         self.to_download.push((to_download, do_work));
         self
     }
@@ -121,6 +131,7 @@ impl ConduitBuilder {
             overwrite,
             to_remove,
             to_download,
+            ..
         } = self;
         Conduit {
             name,
@@ -143,10 +154,52 @@ pub struct Conduit {
     overwrite: Vec<(CString, u32, PalmDatabase<PdbDatabase>)>,
 
     to_remove: Vec<CString>,
-    to_download: Vec<(CString, WorkOnDbType)>,
+    to_download: Vec<(CString, ConduitDBSink)>,
 }
 
 impl Conduit {
+    fn read_rec_by_index(
+        index: u16,
+        size_estimate: Option<u16>,
+        handle: openDatabaseHandle,
+        sync: &SyncSession,
+    ) -> Result<(Vec<u8>, RecordAttributes, u32), ConduitError> {
+        let size = size_estimate.unwrap_or(1024);
+        let mut bytes = vec![0_u8; size as usize];
+
+        let mut to_fill = MaybeUninit::new(CRawRecordInfo::new_for_reading_by_index(
+            handle, index, &mut bytes,
+        ));
+        let mut ret_val = unsafe { sync.api.SyncReadRecordByIndex(to_fill.as_mut_ptr()) };
+
+        // retry with the correct buffer size if too small
+        if ret_val == SyncManagerError::SYNCERR_LOCAL_BUFF_TOO_SMALL {
+            let new_size = unsafe { to_fill.assume_init_ref().get_size() } as usize;
+            bytes.resize(new_size, 0_u8);
+            to_fill = MaybeUninit::new(CRawRecordInfo::new_for_reading_by_index(
+                handle, index, &mut bytes,
+            ));
+            ret_val = unsafe { sync.api.SyncReadRecordByIndex(to_fill.as_mut_ptr()) };
+        }
+        return_iff_conduit_err!(ret_val);
+
+        let record = unsafe { to_fill.assume_init() };
+        let attribs: RecordAttributes = record.get_attributes().into();
+        let id = record.get_id();
+        Ok((bytes, attribs, id))
+    }
+
+    fn get_db_rec_count(
+        handle: openDatabaseHandle,
+        sync: &SyncSession,
+    ) -> Result<u32, ConduitError> {
+        let mut ret = MaybeUninit::new(0);
+        unsafe {
+            return_iff_conduit_err!(sync.api.SyncGetDBRecordCount(handle, ret.as_mut_ptr()));
+            Ok(ret.assume_init())
+        }
+    }
+
     fn remove_db(to_remove: CString, sync: &SyncSession) -> Result<(), ConduitError> {
         let ret = unsafe {
             sync.api
@@ -182,6 +235,29 @@ impl Conduit {
         ret
     }
 
+    fn open_db(to_open: CString, sync: &SyncSession) -> Result<openDatabaseHandle, ConduitError> {
+        let mut handle = MaybeUninit::new(openDatabaseHandle::default());
+        let m_name = {
+            let mut name = [0; DB_NAMELEN];
+            for (idx, char) in to_open.into_bytes().into_iter().enumerate() {
+                if idx >= DB_NAMELEN - 1 {
+                    break;
+                }
+                name[idx] = char;
+            }
+            name
+        };
+        unsafe {
+            return_iff_conduit_err!(sync.api.SyncOpenDB(
+                m_name.as_ptr(),
+                0,
+                handle.as_mut_ptr(),
+                eDbOpenModes::eDbExclusive | eDbOpenModes::eDbRead | eDbOpenModes::eDbWrite
+            ));
+            Ok(handle.assume_init())
+        }
+    }
+
     fn create_db(
         to_create: CString,
         creator_id: u32,
@@ -207,12 +283,24 @@ impl Conduit {
         sync.log_to_hs_log(CString::new(log_str).unwrap())?;
         Ok(stats.handle())
     }
+
     fn drain_db(
         handle: openDatabaseHandle,
         sync: &SyncSession,
-    ) -> Result<Vec<(<PdbDatabase as DatabaseFormat>::RecordHeader, Vec<u8>)>, ConduitError> {
-        compile_error!("continue here");
-        Ok(Vec::new())
+    ) -> Result<Vec<(Vec<u8>, RecordAttributes, u32)>, ConduitError> {
+        let rec_count = Self::get_db_rec_count(handle, sync)?;
+        let mut ret = Vec::with_capacity(rec_count as usize);
+
+        for record_index in 0..rec_count {
+            ret.push(Self::read_rec_by_index(
+                record_index as u16,
+                None,
+                handle,
+                sync,
+            )?);
+        }
+
+        Ok(ret)
     }
 
     fn fill_db(
@@ -297,7 +385,18 @@ impl Conduit {
             .unwrap(),
         )?;
 
-        ss.log_to_hs_log(CString::new("Removing databases\n").unwrap())?;
+        for (to_drain, operation) in self.to_download {
+            let Ok(handle) = Self::open_db(to_drain.clone(), &ss) else {
+                continue;
+            };
+            let results = Self::drain_db(handle, ss)?;
+            match operation {
+                ConduitDBSink::Dynamic(mut op) => op(results)?,
+            }
+            Self::close_db(handle, &ss)?;
+            Self::remove_db(to_drain, &ss)?;
+        }
+
         for to_remove in self.to_remove {
             Self::remove_db(to_remove, &ss)?;
         }
@@ -305,7 +404,6 @@ impl Conduit {
             Self::remove_db(to_remove, &ss)?;
         }
 
-        ss.log_to_hs_log(CString::new("Creating and filling databases\n").unwrap())?;
         for (name, ty, db) in self.create_if_not_exists {
             let handle = Self::create_db(name, self.creator_id, ty, false, &ss)?;
             Self::fill_db(handle, db, &ss)?;

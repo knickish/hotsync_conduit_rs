@@ -3,16 +3,19 @@
 #![allow(unused)]
 
 use std::{
-    ffi::{c_int, c_short, CString},
+    ffi::{c_int, c_short, c_void, CString, OsString},
     marker::PhantomData,
+    path::{Path, PathBuf},
 };
 
-use dlopen2::wrapper::WrapperApi;
+use dlopen2::wrapper::{Container, WrapperApi};
+use palmrs::database::record::pdb_record::RecordAttributes;
 
 use crate::error::SyncManagerError;
 
 const SYNC_DB_NAMELEN: usize = 32;
-const DB_NAMELEN: usize = 32;
+pub const DB_NAMELEN: usize = 32;
+const BIG_PATH: usize = 256;
 const SYNC_REMOTE_USERNAME_BUF_SIZE: usize = 64;
 const SYNC_REMOTE_PASSWORD_BUF_SIZE: usize = 64;
 
@@ -52,6 +55,75 @@ pub enum eSyncPref {
     ePermanentPreference,
     eTemporaryPreference,
     eSyncPrefDoNotUse = 0xffffffff,
+}
+
+// class CSyncProperties
+// {
+// public:
+// 	eSyncTypes m_SyncType;               // Fast/Slow
+// #ifdef macintosh
+// 	union
+// 	{
+// 		char m_PathName[BIG_PATH];				// Path to prepend for disk file names (Windows only)
+// 		FSSpec m_UserDirFSSpec; 				// location of directory that data files  should be created in (Macintosh only)
+// 	} u;
+// #else
+// 	char       m_PathName[BIG_PATH];     // Path to prepend for disk file names
+// #endif
+// 	char       m_LocalName[BIG_PATH];    // Actual local disk file names
+// 	char       m_UserName[BIG_PATH];
+//   	char*      m_RemoteName[SYNC_DB_NAMELEN]; // Names of remote database file names
+// 	CDbListPtr *m_RemoteDbList;			 // CDbLists of remote databases
+// 	int		   m_nRemoteCount;	         // number of remote database files
+// 	DWORD      m_Creator;                // needed to create remote Db's
+// 	WORD       m_CardNo;                 // needed to create remote Db's
+// 	DWORD      m_DbType;                 // needed to create remote Db's
+// 	DWORD      m_AppInfoSize;            // convenience
+// 	DWORD      m_SortInfoSize;           // convenience
+// 	eFirstSync m_FirstDevice;            // First time sync for 1 device
+// 	eConnType  m_Connection;             // Transfer medium
+// 	char       m_Registry[BIG_PATH];	 // Full registry path for the conduit
+// 	HKEY       m_hKey;                   // primary registry key
+// 	DWORD	   m_dwReserved;			 // Reserved - set to NULL
+// };
+
+#[repr(packed, C)]
+pub struct CSyncProperties {
+    m_SyncType: eSyncTypes,                      // Fast/Slow
+    m_PathName: [core::ffi::c_uchar; BIG_PATH],  // Path to prepend for disk file names
+    m_LocalName: [core::ffi::c_uchar; BIG_PATH], // Actual local disk file names
+    m_UserName: [core::ffi::c_uchar; BIG_PATH],
+    m_RemoteName: [core::ffi::c_uchar; SYNC_DB_NAMELEN], // Names of remote database file names
+    m_RemoteDbList: *const c_void,                       // CDbLists of remote databases
+    m_nRemoteCount: c_int,                               // number of remote database files
+    m_Creator: u32,                                      // needed to create remote Db's
+    m_CardNo: u16,                                       // needed to create remote Db's
+    m_DbType: u32,                                       // needed to create remote Db's
+    m_AppInfoSize: u32,                                  // convenience
+    m_SortInfoSize: u32,                                 // convenience
+    m_FirstDevice: eFirstSync,                           // First time sync for 1 device
+    m_Connection: eConnType,                             // Transfer medium
+    m_Registry: [core::ffi::c_uchar; BIG_PATH],          // Full registry path for the conduit
+    m_hKey: *const c_void,                               // primary registry key
+    m_dwReserved: u32,                                   // Reserved - set to NULL
+}
+
+impl CSyncProperties {
+    pub fn get_dir_path(&self) -> Option<PathBuf> {
+        if self.m_PathName[0] == core::ffi::c_uchar::default() {
+            return None;
+        }
+        let byte_vec = self
+            .m_PathName
+            .iter()
+            .copied()
+            .take_while(|x| *x != core::ffi::c_uchar::default())
+            .collect::<Vec<_>>();
+        let stir = String::from_utf8_lossy(&byte_vec).into_owned();
+        let os_str: OsString = stir.try_into().unwrap();
+        let path = PathBuf::from(&os_str);
+        Some(path)
+    }
 }
 
 bitflags::bitflags! {
@@ -226,7 +298,7 @@ pub struct CRawRecordInfo<'buffer> {
 }
 
 impl<'buffer> CRawRecordInfo<'buffer> {
-    pub unsafe fn new_for_writing(
+    pub(crate) fn new_for_writing(
         m_FileHandle: openDatabaseHandle,
         m_Attribs: u8,
         m_CatId: i16,
@@ -246,6 +318,38 @@ impl<'buffer> CRawRecordInfo<'buffer> {
             m_dwReserved: 0,
             buffer_lifetime: PhantomData,
         }
+    }
+
+    pub(crate) fn new_for_reading_by_index(
+        m_FileHandle: openDatabaseHandle,
+        index: u16,
+        bytes: &mut Vec<u8>,
+    ) -> Self {
+        Self {
+            m_FileHandle,
+            m_RecId: 0,
+            m_RecIndex: index,
+            m_Attribs: 0,
+            m_CatId: 0,
+            m_ConduitId: 0,
+            m_RecSize: bytes.len() as u32,
+            m_TotalBytes: bytes.len() as u16,
+            m_pBytes: bytes.as_mut_ptr(),
+            m_dwReserved: 0,
+            buffer_lifetime: PhantomData,
+        }
+    }
+
+    pub(crate) fn get_size(&self) -> u16 {
+        self.m_TotalBytes
+    }
+
+    pub(crate) fn get_attributes(&self) -> u8 {
+        self.m_Attribs
+    }
+
+    pub(crate) fn get_id(&self) -> u32 {
+        self.m_RecId
     }
 }
 
