@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{error::Error, fmt::Display};
 
 const SYNC_ERR_CLASS: i32 = 0x00004000;
 const SYNC_FATAL_ERR_MASK: i32 = 0x10000000;
@@ -197,6 +197,13 @@ pub enum ConduitError {
     Sync(SyncManagerError),
     DlOpen2(dlopen2::Error),
     Io(std::io::Error),
+    Download(Box<dyn Error + Send + Sync>),
+}
+
+impl From<Box<dyn Error + Send + Sync>> for ConduitError {
+    fn from(value: Box<dyn Error + Send + Sync>) -> Self {
+        Self::Download(value)
+    }
 }
 
 impl From<ConduitRegistrationError> for ConduitError {
@@ -227,11 +234,20 @@ impl Display for ConduitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Conduit Error Encountered")?;
         match self {
+            ConduitError::Registration(_) => writeln!(f, "Error Regisetering Conduit")?,
+            ConduitError::Sync(_) => writeln!(f, "Sync Error")?,
+            ConduitError::Io(_) => writeln!(f, "IO Error")?,
+            ConduitError::DlOpen2(_) => writeln!(f, "Error loading HotSync DLL")?,
+            ConduitError::Download(_) => writeln!(f, "Error Executing Post-Download Task")?,
+            _ => (),
+        };
+        match self {
             ConduitError::NonAsciiErr => write!(f, "Non-ascii characters are not supported"),
             ConduitError::Registration(inner) => inner.fmt(f),
             ConduitError::Sync(inner) => inner.fmt(f),
             ConduitError::Io(inner) => inner.fmt(f),
             ConduitError::DlOpen2(inner) => inner.fmt(f),
+            ConduitError::Download(inner) => inner.fmt(f),
         }
     }
 }
