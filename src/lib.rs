@@ -10,3 +10,4 @@ mod error;
 pub use condmgr::{ConduitInstallation, ConduitManager};
 pub use error::SyncManagerError;
 pub use syncmgr::*;
+pub use syncmgr_extern::CSyncProperties;

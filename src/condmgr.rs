@@ -66,8 +66,8 @@ impl ConduitInstallation {
     }
 
     /// Set the directory used for storing files
-    pub fn with_directory(mut self, creator_directory: &camino::Utf8Path) -> Self {
-        self.creator_directory = Some(CString::new(creator_directory.as_str()).unwrap());
+    pub fn with_directory(mut self, creator_directory: impl Into<CString>) -> Self {
+        self.creator_directory = Some(CString::new(creator_directory.into()).unwrap());
         self
     }
 

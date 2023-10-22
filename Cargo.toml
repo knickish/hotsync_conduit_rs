@@ -9,7 +9,7 @@ edition = "2021"
 bitflags = "2.4.0"
 camino = "1.1.6"
 dlopen2 = "0.6.1"
-palmrs = { git = "https://github.com/knickish/palmrs.git", branch = "dogfooding_tweaks" }
+palmrs = { git = "https://github.com/u1f408/palmrs.git", sha = "008687c"}
 
 [[example]]
 name = "heffalump_conduit"
