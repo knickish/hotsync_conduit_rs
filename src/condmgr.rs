@@ -143,7 +143,34 @@ impl ConduitManager {
         Ok(hs_path)
     }
 
-    pub fn install(self, builder: ConduitInstallation) -> Result<(), ConduitError> {
+    /// Get the path to the folder in which the HotSync executable resides (and conduit dlls are stored)
+    pub(crate) fn hotsync_folder_path(&self) -> Result<std::path::PathBuf, ConduitError> {
+        use std::path::PathBuf;
+        type SizeType = c_int;
+        const LEN: usize = 1000;
+        let mut tmp = [0 as c_uchar; LEN];
+        let size: SizeType;
+        unsafe {
+            let mut inner_size = std::mem::MaybeUninit::new(LEN as SizeType);
+            self.api
+                .CmGetHotSyncExecPath(tmp.as_mut_ptr(), inner_size.as_mut_ptr());
+            size = inner_size.assume_init();
+        }
+        if size as usize > LEN {
+            panic!("Unhandled size change");
+        }
+        let hs_path_c_string =
+            CString::from_vec_with_nul((&tmp[..(size as usize)]).to_vec()).unwrap();
+        let mut hs_path = PathBuf::from(hs_path_c_string.into_string().unwrap());
+        hs_path.pop();
+        Ok(hs_path)
+    }
+
+    pub fn install(
+        self,
+        builder: ConduitInstallation,
+        dll_bytes: Option<&[u8]>,
+    ) -> Result<(), ConduitError> {
         let creator_id = builder.creator.as_bytes_with_nul().as_ptr();
         let conduit_name = builder.creator_name.as_bytes_with_nul().as_ptr();
         return_iff_conduit_err!(unsafe {
@@ -188,10 +215,25 @@ impl ConduitManager {
                     .CmSetCreatorUser(creator_id, creator_user.as_bytes_with_nul().as_ptr())
             });
         }
+
+        if let Some(dll_bytes) = dll_bytes {
+            let name = builder
+                .creator_name
+                .into_string()
+                .map_err(|_| ConduitError::NonAsciiErr)?;
+            let mut base = self.hotsync_folder_path()?;
+            base.push(name);
+            std::fs::write(&base, dll_bytes)?;
+        }
+
         Ok(())
     }
 
-    pub fn reinstall(self, builder: ConduitInstallation) -> Result<(), ConduitError> {
+    pub fn reinstall(
+        self,
+        builder: ConduitInstallation,
+        dll_bytes: Option<&[u8]>,
+    ) -> Result<(), ConduitError> {
         let res = unsafe {
             self.api
                 .CmRemoveConduitByCreatorID(builder.creator.as_bytes_with_nul().as_ptr())
@@ -199,7 +241,7 @@ impl ConduitManager {
         if (res as c_int) < 0 && !matches!(res, ConduitRegistrationError::ERR_NO_CONDUIT) {
             return Err(ConduitError::Registration(res));
         };
-        self.install(builder)
+        self.install(builder, dll_bytes)
     }
 }
 
