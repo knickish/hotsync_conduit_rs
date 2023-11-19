@@ -16,7 +16,10 @@ From a cdylib target, export a function named 'OpenConduit' with the signature s
 
 ```rust
 #[no_mangle]
-pub extern "cdecl" fn OpenConduit(_: *const c_void, _: *const c_void) -> c_long {
+pub unsafe extern "cdecl" fn OpenConduit(
+    _: *const c_void,
+    sync_props: *const CSyncProperties,
+) -> c_long {
     let database: PalmDatabase::<PdbDatabase> = fn_that_generates_your_db();
     let conduit =
         ConduitBuilder::new_with_name_creator(
@@ -47,7 +50,7 @@ let builder = ConduitInstallation::new_with_creator(
 
 ConduitManager::initialize()
     .unwrap()
-    .reinstall(builder)
+    .reinstall(builder, None)
     .unwrap();
 ```
 
