@@ -198,6 +198,7 @@ pub enum ConduitError {
     DlOpen2(dlopen2::Error),
     Io(std::io::Error),
     Download(Box<dyn Error + Send + Sync>),
+    PreferenceSerde,
 }
 
 impl From<Box<dyn Error + Send + Sync>> for ConduitError {
@@ -234,11 +235,12 @@ impl Display for ConduitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Conduit Error Encountered")?;
         match self {
-            ConduitError::Registration(_) => writeln!(f, "Error Regisetering Conduit")?,
+            ConduitError::Registration(_) => writeln!(f, "Error Registering Conduit")?,
             ConduitError::Sync(_) => writeln!(f, "Sync Error")?,
             ConduitError::Io(_) => writeln!(f, "IO Error")?,
             ConduitError::DlOpen2(_) => writeln!(f, "Error loading HotSync DLL")?,
             ConduitError::Download(_) => writeln!(f, "Error Executing Post-Download Task")?,
+            ConduitError::PreferenceSerde => writeln!(f, "Error reading or writing preferences")?,
             _ => (),
         };
         match self {
@@ -248,6 +250,7 @@ impl Display for ConduitError {
             ConduitError::Io(inner) => inner.fmt(f),
             ConduitError::DlOpen2(inner) => inner.fmt(f),
             ConduitError::Download(inner) => inner.fmt(f),
+            _ => Ok(()),
         }
     }
 }
