@@ -13,8 +13,8 @@ use palmrs::database::{
 use crate::{
     error::{ConduitError, SyncManagerError},
     syncmgr_extern::{
-        eDbOpenModes, openDatabaseHandle, CDbCreateDB, CRawRecordInfo, SyncMgrApi, CONDHANDLE,
-        DB_NAMELEN,
+        eDbOpenModes, openDatabaseHandle, CDbCreateDB, CRawPreferenceInfo, CRawRecordInfo,
+        SyncMgrApi, CONDHANDLE, DB_NAMELEN,
     },
     ConduitManager,
 };
@@ -34,6 +34,11 @@ fn uchars_to_u32(creator: [c_uchar; 4]) -> u32 {
 
 pub trait DatabaseGenerator {
     fn generate(self: Box<Self>) -> (CString, [c_uchar; 4], PalmDatabase<PdbDatabase>);
+}
+
+pub enum PreferenceType<T> {
+    Static(T),
+    Dynamic(Box<dyn Fn(Option<T>) -> Option<T>>),
 }
 
 /// Need the database name (with no extension), the type code, and the db itself
@@ -75,7 +80,7 @@ type WorkOnDbType = Box<
     dyn FnMut(Vec<(Vec<u8>, RecordAttributes, u32)>) -> Result<(), Box<dyn Error + Sync + Send>>,
 >;
 
-pub struct ConduitBuilder {
+pub struct ConduitBuilder<Preferences: TryInto<Vec<u8>> + TryFrom<Vec<u8>> = Vec<u8>> {
     name: CString,
     creator_id: u32,
     create_if_not_exists: Vec<ConduitDBSource>,
@@ -83,6 +88,7 @@ pub struct ConduitBuilder {
 
     to_remove: Vec<CString>,
     to_download: Vec<(CString, ConduitDBSink)>,
+    preferences: Option<PreferenceType<Preferences>>,
 }
 
 impl ConduitBuilder {
@@ -95,6 +101,7 @@ impl ConduitBuilder {
             overwrite: Vec::new(),
             to_remove: Vec::new(),
             to_download: Vec::new(),
+            preferences: None,
         }
     }
 
@@ -131,6 +138,7 @@ impl ConduitBuilder {
             overwrite,
             to_remove,
             to_download,
+            preferences,
             ..
         } = self;
         Conduit {
@@ -143,11 +151,12 @@ impl ConduitBuilder {
             overwrite: overwrite.into_iter().map(ConduitDBSource::get_db).collect(),
             to_remove,
             to_download,
+            preferences,
         }
     }
 }
 
-pub struct Conduit {
+pub struct Conduit<Preferences: TryInto<Vec<u8>> + TryFrom<Vec<u8>> = Vec<u8>> {
     name: CString,
     creator_id: u32,
     create_if_not_exists: Vec<(CString, u32, PalmDatabase<PdbDatabase>)>,
@@ -155,9 +164,67 @@ pub struct Conduit {
 
     to_remove: Vec<CString>,
     to_download: Vec<(CString, ConduitDBSink)>,
+    preferences: Option<PreferenceType<Preferences>>,
 }
 
-impl Conduit {
+impl<Preferences: TryInto<Vec<u8>> + TryFrom<Vec<u8>>> Conduit<Preferences> {
+    fn get_existing_prefs(
+        sync: &SyncSession,
+        creator: u32,
+        pref_id: u16,
+    ) -> Result<Option<Preferences>, ConduitError> {
+        let mut bytes = vec![0_u8; 1024];
+
+        let mut to_fill = MaybeUninit::new(CRawPreferenceInfo::new_with_buffer(
+            0, creator, pref_id, &mut bytes,
+        ));
+        let mut ret_val = unsafe { sync.api.SyncReadAppPreference(to_fill.as_mut_ptr()) };
+
+        // retry with the correct buffer size if too small
+        if ret_val == SyncManagerError::SYNCERR_LOCAL_BUFF_TOO_SMALL {
+            let new_size = unsafe { to_fill.assume_init_ref().get_required_size() } as usize;
+            bytes.resize(new_size, 0_u8);
+            to_fill = MaybeUninit::new(CRawPreferenceInfo::new_with_buffer(
+                0, creator, pref_id, &mut bytes,
+            ));
+            ret_val = unsafe { sync.api.SyncReadAppPreference(to_fill.as_mut_ptr()) };
+        }
+
+        if matches!(ret_val, SyncManagerError::SYNCERR_NOT_FOUND) {
+            return Ok(None);
+        } else {
+            return_iff_conduit_err!(ret_val);
+            let prefs = unsafe { to_fill.assume_init() };
+            let prefs_size = prefs.m_actSize as usize;
+            drop(prefs);
+            bytes.truncate(prefs_size);
+            let prefs = bytes.try_into().map_err(|_| {
+                sync.log_to_hs_log(CString::new("Failure reading prefs from device\n").unwrap())
+                    .unwrap();
+                ConduitError::PreferenceSerde
+            })?;
+            Ok(Some(prefs))
+        }
+    }
+
+    fn write_prefs(
+        sync: &SyncSession,
+        preferences: Preferences,
+        creator: u32,
+        pref_id: u16,
+    ) -> Result<(), ConduitError> {
+        let mut pref_bytes = preferences
+            .try_into()
+            .map_err(|_| ConduitError::PreferenceSerde)?;
+        let mut prefs = CRawPreferenceInfo::new_with_buffer(0, creator, pref_id, &mut pref_bytes);
+        unsafe {
+            return_iff_conduit_err!(sync
+                .api
+                .SyncWriteAppPreference(&mut prefs as *mut CRawPreferenceInfo));
+        }
+        Ok(())
+    }
+
     fn read_rec_by_index(
         index: u16,
         size_estimate: Option<u16>,
@@ -354,7 +421,7 @@ impl Conduit {
     }
 }
 
-impl Conduit {
+impl<Preferences: TryInto<Vec<u8>> + TryFrom<Vec<u8>>> Conduit<Preferences> {
     /// Execute the conduit tasks defined with `ConduitBuilder`
     pub fn sync(self) -> Result<(), ConduitError> {
         let ss = SyncSession::init()?;
@@ -384,6 +451,19 @@ impl Conduit {
             ))
             .unwrap(),
         )?;
+
+        if let Some(pref) = self.preferences {
+            match pref {
+                PreferenceType::Static(pref) => Self::write_prefs(ss, pref, self.creator_id, 0)?,
+                PreferenceType::Dynamic(dyn_pref) => {
+                    let current = Self::get_existing_prefs(ss, self.creator_id, 0)?;
+                    match (dyn_pref)(current) {
+                        Some(new) => Self::write_prefs(ss, new, self.creator_id, 0)?,
+                        None => (),
+                    }
+                }
+            }
+        }
 
         for (to_drain, operation) in self.to_download {
             let Ok(handle) = Self::open_db(to_drain.clone(), &ss) else {
