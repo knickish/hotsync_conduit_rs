@@ -9,19 +9,21 @@ const CONTENT_DB: &[u8] = include_bytes!("HeffalumpContentDB.pdb");
 
 #[no_mangle]
 pub extern "cdecl" fn OpenConduit(_: *const c_void, _: *const c_void) -> c_long {
-    let conduit =
-        ConduitBuilder::new_with_name_creator(CString::new("heffalump_conduit").unwrap(), CREATOR)
-            .overwrite_db(ConduitDBSource::Static(
-                CString::new("HeffalumpAuthorDB").unwrap(),
-                [b'A', b'u', b't', b'h'],
-                PalmDatabase::<PdbDatabase>::from_bytes(&AUTHOR_DB).unwrap(),
-            ))
-            .overwrite_db(ConduitDBSource::Static(
-                CString::new("HeffalumpContentDB").unwrap(),
-                [b'T', b'o', b'o', b't'],
-                PalmDatabase::<PdbDatabase>::from_bytes(&CONTENT_DB).unwrap(),
-            ))
-            .build();
+    let conduit = ConduitBuilder::<Vec<u8>>::new_with_name_creator(
+        CString::new("heffalump_conduit").unwrap(),
+        CREATOR,
+    )
+    .overwrite_db(ConduitDBSource::Static(
+        CString::new("HeffalumpAuthorDB").unwrap(),
+        [b'A', b'u', b't', b'h'],
+        PalmDatabase::<PdbDatabase>::from_bytes(&AUTHOR_DB).unwrap(),
+    ))
+    .overwrite_db(ConduitDBSource::Static(
+        CString::new("HeffalumpContentDB").unwrap(),
+        [b'T', b'o', b'o', b't'],
+        PalmDatabase::<PdbDatabase>::from_bytes(&CONTENT_DB).unwrap(),
+    ))
+    .build();
 
     match conduit.sync() {
         Ok(_) => 0,
@@ -54,7 +56,7 @@ mod test {
 
         ConduitManager::initialize()
             .unwrap()
-            .reinstall(builder)
+            .reinstall(builder, None)
             .unwrap();
     }
 }

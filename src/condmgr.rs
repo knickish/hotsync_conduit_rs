@@ -105,8 +105,8 @@ impl ConduitManager {
 
     pub fn initialize() -> Result<Self, ConduitError> {
         let condmgr_name = "Condmgr.dll";
-        if let Ok(wrapper) = unsafe { Container::load(condmgr_name) } {
-            Ok(Self { api: wrapper })
+        let loaded = if let Ok(wrapper) = unsafe { Container::load(condmgr_name) } {
+            Self { api: wrapper }
         } else {
             let mut path = std::env::temp_dir();
             path.push(condmgr_name);
@@ -114,10 +114,12 @@ impl ConduitManager {
             file.write_all(COND_MGR_BIN)?;
             file.sync_all()?;
             drop(file);
-            Ok(Self {
+            Self {
                 api: unsafe { Container::load(path) }?,
-            })
-        }
+            }
+        };
+        log::info!("Condmgr.dll loaded");
+        Ok(loaded)
     }
 
     pub(crate) fn get_sync_mgr_dll_path(&self) -> Result<std::path::PathBuf, ConduitError> {
@@ -226,6 +228,7 @@ impl ConduitManager {
             std::fs::write(&base, dll_bytes)?;
         }
 
+        log::info!("Conduit successfully installed");
         Ok(())
     }
 

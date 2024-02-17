@@ -3,7 +3,7 @@
 #![allow(unused)]
 
 use std::{
-    ffi::{c_int, c_short, c_void, CString, OsString},
+    ffi::{c_int, c_long, c_short, c_void, CString, OsString},
     marker::PhantomData,
     path::{Path, PathBuf},
 };
@@ -353,6 +353,7 @@ impl<'buffer> CRawRecordInfo<'buffer> {
     }
 }
 
+#[derive(Debug)]
 #[repr(packed, C)]
 pub struct CRawPreferenceInfo<'a> {
     pub m_version: u16,    // Pref version
@@ -361,11 +362,11 @@ pub struct CRawPreferenceInfo<'a> {
     pub m_reqBytes: u16,   // Number of preference bytes requested (read calls only)
     pub m_retBytes: u16,   // Number of preference bytes copied to caller's buffer (read calls only)
     pub m_actSize: u16,    // Actual pref size (read calls only)
-    pub m_backedUp: bool,  // If true, the target pref database is the backed-up database
-    pub m_nBytes: i32,     // Buffer size in read calls, data size in write calls
+    pub m_backedUp: u8,    // If true, the target pref database is the backed-up database
+    pub m_nBytes: c_long,  // Buffer size in read calls, data size in write calls
     pub m_pBytes: *mut u8, // Data buffer
     pub m_dwReserved: u32, // Reserved
-    _marker: PhantomData<&'a u8>,
+    _marker: PhantomData<&'a [u8]>,
 }
 
 impl<'a> CRawPreferenceInfo<'a> {
@@ -379,11 +380,11 @@ impl<'a> CRawPreferenceInfo<'a> {
             m_version: version,
             m_creator: creator,
             m_prefId: pref_id,
-            m_reqBytes: 0,     // set accordingly if needed
-            m_retBytes: 0,     // set accordingly if needed
-            m_actSize: 0,      // set accordingly if needed
-            m_backedUp: false, // set this flag based on your requirements
-            m_nBytes: buffer.len() as i32,
+            m_reqBytes: u16::MAX, // set accordingly if needed
+            m_retBytes: 0,        // set accordingly if needed
+            m_actSize: 0,         // set accordingly if needed
+            m_backedUp: 1,        // set this flag based on your requirements
+            m_nBytes: buffer.len() as c_long,
             m_pBytes: buffer.as_mut_ptr(),
             m_dwReserved: 0,
             _marker: PhantomData,
@@ -542,5 +543,5 @@ pub struct SyncMgrApi {
     SyncReadPositionXMap:       unsafe extern "C" fn(rInfo: *mut CPositionInfo) -> SyncManagerError,
     SyncYieldCycles:            unsafe extern "C" fn(wMaxMiliSecs: u16) -> SyncManagerError,
     SyncReadAppPreference:      unsafe extern "C" fn(rInfo: *mut CRawPreferenceInfo) -> SyncManagerError,
-    SyncWriteAppPreference:     unsafe extern "C" fn(rInfo: *mut CRawPreferenceInfo) -> SyncManagerError,
+    SyncWriteAppPreference:     unsafe extern "C" fn(rInfo: *const CRawPreferenceInfo) -> SyncManagerError,
 }

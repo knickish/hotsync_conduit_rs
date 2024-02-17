@@ -199,6 +199,8 @@ pub enum ConduitError {
     Io(std::io::Error),
     Download(Box<dyn Error + Send + Sync>),
     PreferenceSerde,
+    /// The requested application preference does not exist on the device
+    NoSuchPreference,
 }
 
 impl From<Box<dyn Error + Send + Sync>> for ConduitError {
@@ -241,6 +243,10 @@ impl Display for ConduitError {
             ConduitError::DlOpen2(_) => writeln!(f, "Error loading HotSync DLL")?,
             ConduitError::Download(_) => writeln!(f, "Error Executing Post-Download Task")?,
             ConduitError::PreferenceSerde => writeln!(f, "Error reading or writing preferences")?,
+            ConduitError::NoSuchPreference => writeln!(
+                f,
+                "The requested application preference does not exist on the device"
+            )?,
             _ => (),
         };
         match self {

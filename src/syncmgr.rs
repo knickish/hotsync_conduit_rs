@@ -5,6 +5,7 @@ use std::{
 };
 
 use dlopen2::wrapper::Container;
+use log::{error, info};
 use palmrs::database::{
     record::{pdb_record::RecordAttributes, DatabaseRecord},
     PalmDatabase, PdbDatabase,
@@ -37,8 +38,8 @@ pub trait DatabaseGenerator {
 }
 
 pub enum PreferenceType<T> {
-    Static(T),
-    Dynamic(Box<dyn Fn(Option<T>) -> Option<T>>),
+    Static(u16, T),
+    Dynamic(u16, Box<dyn Fn(Option<T>) -> Option<T>>),
 }
 
 /// Need the database name (with no extension), the type code, and the db itself
@@ -91,7 +92,7 @@ pub struct ConduitBuilder<Preferences: TryInto<Vec<u8>> + TryFrom<Vec<u8>> = Vec
     preferences: Option<PreferenceType<Preferences>>,
 }
 
-impl ConduitBuilder {
+impl<Preferences: TryInto<Vec<u8>> + TryFrom<Vec<u8>>> ConduitBuilder<Preferences> {
     /// Create a new conduit. The creator field must match the CreatorID used in your application
     pub fn new_with_name_creator(conduit_name: impl Into<CString>, creator: [c_uchar; 4]) -> Self {
         Self {
@@ -129,8 +130,14 @@ impl ConduitBuilder {
         self
     }
 
+    /// Set the preferences for the application
+    pub fn set_preferences(mut self, source: PreferenceType<Preferences>) -> Self {
+        self.preferences = Some(source);
+        self
+    }
+
     /// Build the conduit
-    pub fn build(self) -> Conduit {
+    pub fn build(self) -> Conduit<Preferences> {
         let Self {
             name,
             creator_id,
@@ -213,14 +220,20 @@ impl<Preferences: TryInto<Vec<u8>> + TryFrom<Vec<u8>>> Conduit<Preferences> {
         creator: u32,
         pref_id: u16,
     ) -> Result<(), ConduitError> {
+        let Some(_): Option<Preferences> = Conduit::get_existing_prefs(sync, creator, pref_id)?
+        else {
+            return Err(ConduitError::NoSuchPreference);
+        };
+
         let mut pref_bytes = preferences
             .try_into()
             .map_err(|_| ConduitError::PreferenceSerde)?;
-        let mut prefs = CRawPreferenceInfo::new_with_buffer(0, creator, pref_id, &mut pref_bytes);
+        let prefs = CRawPreferenceInfo::new_with_buffer(1, creator, pref_id, &mut pref_bytes);
+        info!("prefs to write {:?}", prefs);
         unsafe {
             return_iff_conduit_err!(sync
                 .api
-                .SyncWriteAppPreference(&mut prefs as *mut CRawPreferenceInfo));
+                .SyncWriteAppPreference(&prefs as *const CRawPreferenceInfo));
         }
         Ok(())
     }
@@ -428,7 +441,10 @@ impl<Preferences: TryInto<Vec<u8>> + TryFrom<Vec<u8>>> Conduit<Preferences> {
         let name = self.name.clone();
 
         let ret = match self.sync_internal(&ss) {
-            Ok(_) => Ok(()),
+            Ok(_) => {
+                let _ = ss.log_to_hs_log(CString::new("Sync completed!").unwrap());
+                Ok(())
+            }
             Err(e) => {
                 let err_str = format!(
                     "Encountered error {} during sync of {}\n",
@@ -452,17 +468,31 @@ impl<Preferences: TryInto<Vec<u8>> + TryFrom<Vec<u8>>> Conduit<Preferences> {
             .unwrap(),
         )?;
 
+        match Self::get_existing_prefs(ss, self.creator_id, 1) {
+            Ok(Some(prefs)) => {
+                let pref_bytes: Vec<u8> = prefs.try_into().unwrap_or_default();
+                info!("prefs: {:?}", pref_bytes);
+            }
+            Ok(None) => info!("no preferences found with id: {}", 1),
+            Err(e) => error!("{e}"),
+        }
         if let Some(pref) = self.preferences {
+            ss.log_to_hs_log(CString::new("Syncing preferences").unwrap())?;
             match pref {
-                PreferenceType::Static(pref) => Self::write_prefs(ss, pref, self.creator_id, 0)?,
-                PreferenceType::Dynamic(dyn_pref) => {
-                    let current = Self::get_existing_prefs(ss, self.creator_id, 0)?;
+                PreferenceType::Static(id, pref) => {
+                    Self::write_prefs(ss, pref, self.creator_id, id)?
+                }
+                PreferenceType::Dynamic(id, dyn_pref) => {
+                    let current = Self::get_existing_prefs(ss, self.creator_id, id)?;
                     match (dyn_pref)(current) {
-                        Some(new) => Self::write_prefs(ss, new, self.creator_id, 0)?,
+                        Some(new) => Self::write_prefs(ss, new, self.creator_id, id)?,
                         None => (),
                     }
                 }
             }
+            ss.log_to_hs_log(CString::new("Finished syncing preferences").unwrap())?;
+        } else {
+            info!("No prefs to sync");
         }
 
         for (to_drain, operation) in self.to_download {
@@ -529,6 +559,9 @@ impl SyncSession {
         Ok(())
     }
     fn log_to_hs_log(&self, line: CString) -> Result<(), ConduitError> {
+        if let Ok(string) = line.clone().into_string() {
+            log::info!("HS Log entry: {}", string);
+        }
         return_iff_conduit_err!(unsafe {
             self.api.SyncAddLogEntry(line.as_bytes_with_nul().as_ptr())
         });
