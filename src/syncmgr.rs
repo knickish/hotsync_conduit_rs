@@ -198,7 +198,7 @@ impl<Preferences: TryInto<Vec<u8>> + TryFrom<Vec<u8>>> Conduit<Preferences> {
         }
 
         if matches!(ret_val, SyncManagerError::SYNCERR_NOT_FOUND) {
-            return Ok(None);
+            Ok(None)
         } else {
             return_iff_conduit_err!(ret_val);
             let prefs = unsafe { to_fill.assume_init() };
@@ -220,11 +220,6 @@ impl<Preferences: TryInto<Vec<u8>> + TryFrom<Vec<u8>>> Conduit<Preferences> {
         creator: u32,
         pref_id: u16,
     ) -> Result<(), ConduitError> {
-        let Some(_): Option<Preferences> = Conduit::get_existing_prefs(sync, creator, pref_id)?
-        else {
-            return Err(ConduitError::NoSuchPreference);
-        };
-
         let mut pref_bytes = preferences
             .try_into()
             .map_err(|_| ConduitError::PreferenceSerde)?;
@@ -468,14 +463,18 @@ impl<Preferences: TryInto<Vec<u8>> + TryFrom<Vec<u8>>> Conduit<Preferences> {
             .unwrap(),
         )?;
 
-        match Self::get_existing_prefs(ss, self.creator_id, 1) {
-            Ok(Some(prefs)) => {
-                let pref_bytes: Vec<u8> = prefs.try_into().unwrap_or_default();
-                info!("prefs: {:?}", pref_bytes);
+        // TODO remove this
+        for id in 0..=1 {
+            match Self::get_existing_prefs(ss, self.creator_id, id) {
+                Ok(Some(prefs)) => {
+                    let pref_bytes: Vec<u8> = prefs.try_into().unwrap_or_default();
+                    info!("prefs: {:?}", pref_bytes);
+                }
+                Ok(None) => info!("no preferences found with id: {}", id),
+                Err(e) => error!("{e}"),
             }
-            Ok(None) => info!("no preferences found with id: {}", 1),
-            Err(e) => error!("{e}"),
         }
+
         if let Some(pref) = self.preferences {
             ss.log_to_hs_log(CString::new("Syncing preferences").unwrap())?;
             match pref {

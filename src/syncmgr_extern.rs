@@ -354,7 +354,7 @@ impl<'buffer> CRawRecordInfo<'buffer> {
 }
 
 #[derive(Debug)]
-#[repr(packed, C)]
+#[repr(C, packed)]
 pub struct CRawPreferenceInfo<'a> {
     pub m_version: u16,    // Pref version
     pub m_creator: u32,    // Pref creator
@@ -362,7 +362,7 @@ pub struct CRawPreferenceInfo<'a> {
     pub m_reqBytes: u16,   // Number of preference bytes requested (read calls only)
     pub m_retBytes: u16,   // Number of preference bytes copied to caller's buffer (read calls only)
     pub m_actSize: u16,    // Actual pref size (read calls only)
-    pub m_backedUp: u8,    // If true, the target pref database is the backed-up database
+    pub m_backedUp: c_int, // If true, the target pref database is the backed-up database
     pub m_nBytes: c_long,  // Buffer size in read calls, data size in write calls
     pub m_pBytes: *mut u8, // Data buffer
     pub m_dwReserved: u32, // Reserved
