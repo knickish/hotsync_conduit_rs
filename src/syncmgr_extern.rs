@@ -354,7 +354,7 @@ impl<'buffer> CRawRecordInfo<'buffer> {
 }
 
 #[derive(Debug)]
-#[repr(C, packed)]
+#[repr(packed, C)]
 pub struct CRawPreferenceInfo<'a> {
     pub m_version: u16,    // Pref version
     pub m_creator: u32,    // Pref creator

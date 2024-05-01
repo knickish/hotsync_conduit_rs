@@ -5,7 +5,7 @@ use std::{
 };
 
 use dlopen2::wrapper::Container;
-use log::{error, info};
+use log::info;
 use palmrs::database::{
     record::{pdb_record::RecordAttributes, DatabaseRecord},
     PalmDatabase, PdbDatabase,
@@ -462,18 +462,6 @@ impl<Preferences: TryInto<Vec<u8>> + TryFrom<Vec<u8>>> Conduit<Preferences> {
             ))
             .unwrap(),
         )?;
-
-        // TODO remove this
-        for id in 0..=1 {
-            match Self::get_existing_prefs(ss, self.creator_id, id) {
-                Ok(Some(prefs)) => {
-                    let pref_bytes: Vec<u8> = prefs.try_into().unwrap_or_default();
-                    info!("prefs: {:?}", pref_bytes);
-                }
-                Ok(None) => info!("no preferences found with id: {}", id),
-                Err(e) => error!("{e}"),
-            }
-        }
 
         if let Some(pref) = self.preferences {
             ss.log_to_hs_log(CString::new("Syncing preferences").unwrap())?;
