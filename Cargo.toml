@@ -9,6 +9,7 @@ edition = "2021"
 bitflags = "2.4.0"
 camino = "1.1.6"
 dlopen2 = "0.6.1"
+log = "0.4.20"
 palmrs = { git = "https://github.com/u1f408/palmrs.git", rev = "008687c"}
 
 [[example]]

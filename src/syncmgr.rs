@@ -5,6 +5,7 @@ use std::{
 };
 
 use dlopen2::wrapper::Container;
+use log::info;
 use palmrs::database::{
     record::{pdb_record::RecordAttributes, DatabaseRecord},
     PalmDatabase, PdbDatabase,
@@ -13,8 +14,8 @@ use palmrs::database::{
 use crate::{
     error::{ConduitError, SyncManagerError},
     syncmgr_extern::{
-        eDbOpenModes, openDatabaseHandle, CDbCreateDB, CRawRecordInfo, SyncMgrApi, CONDHANDLE,
-        DB_NAMELEN,
+        eDbOpenModes, openDatabaseHandle, CDbCreateDB, CRawPreferenceInfo, CRawRecordInfo,
+        SyncMgrApi, CONDHANDLE, DB_NAMELEN,
     },
     ConduitManager,
 };
@@ -34,6 +35,11 @@ fn uchars_to_u32(creator: [c_uchar; 4]) -> u32 {
 
 pub trait DatabaseGenerator {
     fn generate(self: Box<Self>) -> (CString, [c_uchar; 4], PalmDatabase<PdbDatabase>);
+}
+
+pub enum PreferenceType<T> {
+    Static(u16, T),
+    Dynamic(u16, Box<dyn Fn(Option<T>) -> Option<T>>),
 }
 
 /// Need the database name (with no extension), the type code, and the db itself
@@ -75,7 +81,7 @@ type WorkOnDbType = Box<
     dyn FnMut(Vec<(Vec<u8>, RecordAttributes, u32)>) -> Result<(), Box<dyn Error + Sync + Send>>,
 >;
 
-pub struct ConduitBuilder {
+pub struct ConduitBuilder<Preferences: TryInto<Vec<u8>> + TryFrom<Vec<u8>> = Vec<u8>> {
     name: CString,
     creator_id: u32,
     create_if_not_exists: Vec<ConduitDBSource>,
@@ -83,9 +89,10 @@ pub struct ConduitBuilder {
 
     to_remove: Vec<CString>,
     to_download: Vec<(CString, ConduitDBSink)>,
+    preferences: Option<PreferenceType<Preferences>>,
 }
 
-impl ConduitBuilder {
+impl<Preferences: TryInto<Vec<u8>> + TryFrom<Vec<u8>>> ConduitBuilder<Preferences> {
     /// Create a new conduit. The creator field must match the CreatorID used in your application
     pub fn new_with_name_creator(conduit_name: impl Into<CString>, creator: [c_uchar; 4]) -> Self {
         Self {
@@ -95,6 +102,7 @@ impl ConduitBuilder {
             overwrite: Vec::new(),
             to_remove: Vec::new(),
             to_download: Vec::new(),
+            preferences: None,
         }
     }
 
@@ -122,8 +130,14 @@ impl ConduitBuilder {
         self
     }
 
+    /// Set the preferences for the application
+    pub fn set_preferences(mut self, source: PreferenceType<Preferences>) -> Self {
+        self.preferences = Some(source);
+        self
+    }
+
     /// Build the conduit
-    pub fn build(self) -> Conduit {
+    pub fn build(self) -> Conduit<Preferences> {
         let Self {
             name,
             creator_id,
@@ -131,6 +145,7 @@ impl ConduitBuilder {
             overwrite,
             to_remove,
             to_download,
+            preferences,
             ..
         } = self;
         Conduit {
@@ -143,11 +158,12 @@ impl ConduitBuilder {
             overwrite: overwrite.into_iter().map(ConduitDBSource::get_db).collect(),
             to_remove,
             to_download,
+            preferences,
         }
     }
 }
 
-pub struct Conduit {
+pub struct Conduit<Preferences: TryInto<Vec<u8>> + TryFrom<Vec<u8>> = Vec<u8>> {
     name: CString,
     creator_id: u32,
     create_if_not_exists: Vec<(CString, u32, PalmDatabase<PdbDatabase>)>,
@@ -155,9 +171,68 @@ pub struct Conduit {
 
     to_remove: Vec<CString>,
     to_download: Vec<(CString, ConduitDBSink)>,
+    preferences: Option<PreferenceType<Preferences>>,
 }
 
-impl Conduit {
+impl<Preferences: TryInto<Vec<u8>> + TryFrom<Vec<u8>>> Conduit<Preferences> {
+    fn get_existing_prefs(
+        sync: &SyncSession,
+        creator: u32,
+        pref_id: u16,
+    ) -> Result<Option<Preferences>, ConduitError> {
+        let mut bytes = vec![0_u8; 1024];
+
+        let mut to_fill = MaybeUninit::new(CRawPreferenceInfo::new_with_buffer(
+            0, creator, pref_id, &mut bytes,
+        ));
+        let mut ret_val = unsafe { sync.api.SyncReadAppPreference(to_fill.as_mut_ptr()) };
+
+        // retry with the correct buffer size if too small
+        if ret_val == SyncManagerError::SYNCERR_LOCAL_BUFF_TOO_SMALL {
+            let new_size = unsafe { to_fill.assume_init_ref().get_required_size() } as usize;
+            bytes.resize(new_size, 0_u8);
+            to_fill = MaybeUninit::new(CRawPreferenceInfo::new_with_buffer(
+                0, creator, pref_id, &mut bytes,
+            ));
+            ret_val = unsafe { sync.api.SyncReadAppPreference(to_fill.as_mut_ptr()) };
+        }
+
+        if matches!(ret_val, SyncManagerError::SYNCERR_NOT_FOUND) {
+            Ok(None)
+        } else {
+            return_iff_conduit_err!(ret_val);
+            let prefs = unsafe { to_fill.assume_init() };
+            let prefs_size = prefs.m_actSize as usize;
+            drop(prefs);
+            bytes.truncate(prefs_size);
+            let prefs = bytes.try_into().map_err(|_| {
+                sync.log_to_hs_log(CString::new("Failure reading prefs from device\n").unwrap())
+                    .unwrap();
+                ConduitError::PreferenceSerde
+            })?;
+            Ok(Some(prefs))
+        }
+    }
+
+    fn write_prefs(
+        sync: &SyncSession,
+        preferences: Preferences,
+        creator: u32,
+        pref_id: u16,
+    ) -> Result<(), ConduitError> {
+        let mut pref_bytes = preferences
+            .try_into()
+            .map_err(|_| ConduitError::PreferenceSerde)?;
+        let prefs = CRawPreferenceInfo::new_with_buffer(1, creator, pref_id, &mut pref_bytes);
+        info!("prefs to write {:?}", prefs);
+        unsafe {
+            return_iff_conduit_err!(sync
+                .api
+                .SyncWriteAppPreference(&prefs as *const CRawPreferenceInfo));
+        }
+        Ok(())
+    }
+
     fn read_rec_by_index(
         index: u16,
         size_estimate: Option<u16>,
@@ -354,14 +429,17 @@ impl Conduit {
     }
 }
 
-impl Conduit {
+impl<Preferences: TryInto<Vec<u8>> + TryFrom<Vec<u8>>> Conduit<Preferences> {
     /// Execute the conduit tasks defined with `ConduitBuilder`
     pub fn sync(self) -> Result<(), ConduitError> {
         let ss = SyncSession::init()?;
         let name = self.name.clone();
 
         let ret = match self.sync_internal(&ss) {
-            Ok(_) => Ok(()),
+            Ok(_) => {
+                let _ = ss.log_to_hs_log(CString::new("Sync completed!").unwrap());
+                Ok(())
+            }
             Err(e) => {
                 let err_str = format!(
                     "Encountered error {} during sync of {}\n",
@@ -384,6 +462,25 @@ impl Conduit {
             ))
             .unwrap(),
         )?;
+
+        if let Some(pref) = self.preferences {
+            ss.log_to_hs_log(CString::new("Syncing preferences").unwrap())?;
+            match pref {
+                PreferenceType::Static(id, pref) => {
+                    Self::write_prefs(ss, pref, self.creator_id, id)?
+                }
+                PreferenceType::Dynamic(id, dyn_pref) => {
+                    let current = Self::get_existing_prefs(ss, self.creator_id, id)?;
+                    match (dyn_pref)(current) {
+                        Some(new) => Self::write_prefs(ss, new, self.creator_id, id)?,
+                        None => (),
+                    }
+                }
+            }
+            ss.log_to_hs_log(CString::new("Finished syncing preferences").unwrap())?;
+        } else {
+            info!("No prefs to sync");
+        }
 
         for (to_drain, operation) in self.to_download {
             let Ok(handle) = Self::open_db(to_drain.clone(), &ss) else {
@@ -449,6 +546,9 @@ impl SyncSession {
         Ok(())
     }
     fn log_to_hs_log(&self, line: CString) -> Result<(), ConduitError> {
+        if let Ok(string) = line.clone().into_string() {
+            log::info!("HS Log entry: {}", string);
+        }
         return_iff_conduit_err!(unsafe {
             self.api.SyncAddLogEntry(line.as_bytes_with_nul().as_ptr())
         });
